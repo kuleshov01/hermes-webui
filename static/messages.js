@@ -1973,7 +1973,26 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           const _prevCost=(S.session&&S.session.estimated_cost)||0;
           const _prevCacheRead=(S.session&&S.session.cache_read_tokens)||0;
           const _prevCacheWrite=(S.session&&S.session.cache_write_tokens)||0;
-          S.session=d.session;S.messages=_carryForwardEphemeralTurnFields(S.messages||[], d.session.messages||[]);if(typeof _messagesTruncated!=='undefined')_messagesTruncated=!!d.session._messages_truncated;
+          // #custom-fix: Message delivery guarantee — preserve trailing assistant
+          // content that the server's done event may not yet include due to a
+          // race between the gateway flushing SSE and persisting the final
+          // message to the session store.  Without this, the last response
+          // silently vanishes from the UI after renderMessages() rebuilds the
+          // DOM from server data.
+          const _clientMessages=S.messages||[];
+          const _serverMessages=d.session.messages||[];
+          const _lastClientAsst=[..._clientMessages].reverse().find(m=>m&&m.role==='assistant'&&String(m.content||'').trim()&&!Array.isArray(m.content));
+          const _lastServerAsst=[..._serverMessages].reverse().find(m=>m&&m.role==='assistant'&&String(m.content||'').trim()&&!Array.isArray(m.content));
+          const _serverHasFinalReply=!!_lastServerAsst&&_lastClientAsst&&String(_lastClientAsst.content).trim()===String(_lastServerAsst.content).trim();
+          S.session=d.session;
+          S.messages=d.session.messages||[];
+          if(!_serverHasFinalReply&&_lastClientAsst){
+            // Server's done payload is missing the last assistant reply — append
+            // the client-side copy so it survives the renderMessages() rebuild.
+            S.messages.push(_lastClientAsst);
+          }
+          S.messages=_carryForwardEphemeralTurnFields(S.messages||[], d.session.messages||[]);
+          if(typeof _messagesTruncated!=='undefined')_messagesTruncated=!!d.session._messages_truncated;
           S.messages=_filterRecoveryControlMessages(S.messages || []);
           if(S.session&&S.session.session_id){
             try{localStorage.setItem('hermes-webui-session',S.session.session_id);}catch(_){}
