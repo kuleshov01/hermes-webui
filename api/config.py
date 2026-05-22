@@ -3970,7 +3970,12 @@ def get_available_models() -> dict:
                     )
                     injected = False
                     for g in groups:
-                        if target_display and g.get("provider", "").lower() == target_display:
+                        # Prefer provider_id match (canonical id) for accurate routing.
+                        # Fallback to provider name display match for backward compatibility.
+                        if (
+                            (active_provider and g.get("provider_id") == active_provider)
+                            or (target_display and g.get("provider", "").lower() == target_display)
+                        ):
                             g["models"].insert(0, {"id": default_model, "label": label})
                             injected = True
                             break

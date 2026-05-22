@@ -2106,6 +2106,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     if(S.session&&S.session.session_id===activeSid){
       S.activeStreamId=null;
       clearLiveToolCards();if(!assistantText)removeThinking();
+      // Clean up stale live assistant turn before re-render (#custom-fix)
+      const staleTurn=document.getElementById('liveAssistantTurn');
+      if(staleTurn) staleTurn.remove();
+      if(typeof renderCompressionUi==='function') renderCompressionUi();
       S.messages.push({role:'assistant',content:'**Error:** Connection lost'});renderMessages({preserveScroll:true});
       _markSessionViewed(activeSid, S.messages.length);
     }else{

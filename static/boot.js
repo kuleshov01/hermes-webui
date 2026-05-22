@@ -11,6 +11,10 @@ async function cancelStream(){
   setBusy(false);
   if(typeof setComposerStatus==='function') setComposerStatus('');
   else setStatus('');
+  // Clean up stale live UI elements left by the interrupted stream (#custom-fix)
+  const staleTurn=document.getElementById('liveAssistantTurn');
+  if(staleTurn) staleTurn.remove();
+  if(typeof renderCompressionUi==='function') renderCompressionUi();
 }
 
 async function cancelSessionStream(session){
