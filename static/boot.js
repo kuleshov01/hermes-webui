@@ -360,15 +360,15 @@ $('btnSend').onclick=()=>{
 $('mainChat')?.addEventListener('pointerdown', closeMobileWorkspacePanelFromChat);
 $('btnAttach').onclick=e=>{if(e&&e.preventDefault)e.preventDefault();$('fileInput').value='';$('fileInput').click();};
 
-// ── Voice input (Web Speech API + MediaRecorder fallback) ───────────────────
+// ── Voice input (server-side transcription via MediaRecorder) ────────────────
 (function(){
-  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  // #custom-fix: Always use MediaRecorder + server-side STT (faster-whisper).
+  // Works on all browsers/devices, language controlled by stt.local.language config.
+  // No dependency on browser SpeechRecognition (Google) — transcribes locally.
   const _canRecordAudio=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&window.MediaRecorder);
-  if(!SpeechRecognition&&!_canRecordAudio) return; // Browser unsupported — mic button stays hidden
+  if(!_canRecordAudio) return; // Browser unsupported — mic button stays hidden
 
-  // Persist SR failure across reloads (e.g. Tailscale/network error)
-  const _micForceMediaRecorderKey='mic_force_mediarecorder';
-  let _forceMediaRecorder=!SpeechRecognition||localStorage.getItem(_micForceMediaRecorderKey)==='1';
+  const _forceMediaRecorder=true; // always use server-side transcription
 
   const btn=$('btnMic');
   const status=$('micStatus');
