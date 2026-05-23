@@ -773,26 +773,58 @@ async function loadSession(sid){
       updateQueueBadge(sid);
       syncTopbar();renderMessages();
       // #custom-fix: Post-load visibility check — after rendering an idle session,
-      // verify the last text-bearing assistant message appears in the DOM. If not
-      // (stale server LRU cache, merge race), try one force-refresh from server.
+      // verify the last text-bearing assistant message appears in the DOM.
+      // If S.messages has it but DOM doesn't → re-render.
+      // If S.messages itself is missing it → fetch full message list from server
+      // (bypass msg_limit) and append the missing tail.
       (function _checkIdleSessionLastReply(){
         try{
           const _msgs=S.messages||[];
-          const _lastAsst=[..._msgs].reverse().find(m=>m&&m.role==='assistant'&&typeof m.content==='string'&&m.content.trim());
-          if(!_lastAsst) return;
-          const _text=String(_lastAsst.content).trim().slice(0,80);
-          const _inner=typeof $('msgInner')==='function'?$('msgInner'):null;
-          if(!_inner) return;
-          const _blocks=_inner.querySelectorAll('.assistant-turn .assistant-content, .assistant-turn .msg-text');
-          let _found=false;
-          for(const b of _blocks){
-            const bt=(b.textContent||'').replace(/\s+/g,' ').trim();
-            if(bt&&bt.includes(_text.replace(/\s+/g,' ').trim().slice(0,60))){_found=true;break;}
+          const _hasAsstReply=_msgs.some(m=>m&&m.role==='assistant'&&typeof m.content==='string'&&m.content.trim());
+          if(_hasAsstReply){
+            // Data is in S.messages — just verify DOM rendered it
+            const _lastAsst=[..._msgs].reverse().find(m=>m&&m.role==='assistant'&&typeof m.content==='string'&&m.content.trim());
+            const _text=String(_lastAsst.content).trim().slice(0,60).replace(/\s+/g,' ');
+            const _inner=typeof $('msgInner')==='function'?$('msgInner'):null;
+            if(!_inner||!_text) return;
+            const _blocks=_inner.querySelectorAll('.assistant-turn');
+            let _found=false;
+            for(const b of _blocks){
+              const bt=(b.textContent||'').replace(/\s+/g,' ');
+              if(bt&&bt.includes(_text)){_found=true;break;}
+            }
+            if(!_found){
+              console.warn('[hermes] last assistant reply in S.messages but not in DOM — re-rendering');
+              renderMessages({preserveScroll:false});
+              if(typeof scrollToBottom==='function') scrollToBottom();
+            }
+            return;
           }
-          if(!_found){
-            console.warn('[hermes] last assistant reply not in DOM after idle load, force-refreshing session', sid);
-            loadSession(sid, {force: true});
-          }
+          // S.messages has NO assistant text reply — might be truncated/missing.
+          // Fetch full message list (no msg_limit) and check again.
+          const _sid=sid;
+          console.warn('[hermes] no assistant reply in S.messages — fetching full list for', _sid);
+          api('/api/session?session_id='+encodeURIComponent(_sid)+'&messages=1&resolve_model=0').then(function(d){
+            if(!d||!d.session||!d.session.messages) return;
+            const _full=d.session.messages.filter(m=>m&&m.role);
+            const _lastFull=[..._full].reverse().find(m=>m&&m.role==='assistant'&&typeof m.content==='string'&&m.content.trim());
+            if(!_lastFull) return;
+            // Check if we already have this message
+            const _existingTexts=new Set(_msgs.filter(m=>m&&m.role==='assistant'&&typeof m.content==='string').map(m=>String(m.content).trim().slice(0,80)));
+            const _newText=String(_lastFull.content).trim().slice(0,80);
+            if(_existingTexts.has(_newText)) return;
+            // Append missing messages from full list tail
+            const _tailStart=Math.max(0,_full.length-50);
+            for(let i=_tailStart;i<_full.length;i++){
+              const m=_full[i];
+              if(m.role==='assistant'&&typeof m.content==='string'&&m.content.trim()&&!_existingTexts.has(String(m.content).trim().slice(0,80))){
+                S.messages.push(m);
+              }
+            }
+            if(typeof renderMessages==='function') renderMessages({preserveScroll:false});
+            if(typeof scrollToBottom==='function') scrollToBottom();
+            if(typeof showToast==='function') showToast('Recovered missing reply from server',3000);
+          }).catch(function(){});
         }catch(_){}
       })();
       if(typeof resumeManualCompressionForSession==='function') resumeManualCompressionForSession(sid);
