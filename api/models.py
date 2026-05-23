@@ -1724,6 +1724,24 @@ def get_session(sid, metadata_only=False):
         cached = SESSIONS.get(sid)
         if cached is not None:
             SESSIONS.move_to_end(sid)  # LRU: mark as recently used
+    # #custom-fix: Stale LRU cache detection for full message loads.
+    # When loading messages (not metadata-only), compare the cached session's
+    # updated_at with the JSON file's mtime. If the file was written after the
+    # session was cached (e.g. a new assistant message was persisted), evict
+    # the stale entry so the fresh data is read from disk.
+    if cached is not None and not metadata_only:
+        try:
+            _cache_updated = float(getattr(cached, 'updated_at', 0) or 0)
+            _p = SESSION_DIR / f'{sid}.json'
+            if _p.exists():
+                _file_mtime = _p.stat().st_mtime
+                if _file_mtime > _cache_updated + 1:
+                    with LOCK:
+                        SESSIONS.pop(sid, None)
+                    cached = None
+                    logger.debug("evicted stale LRU cache for session %s (file_mtime=%.1f > updated_at=%.1f)", sid, _file_mtime, _cache_updated)
+        except Exception:
+            pass
     if cached is not None:
         if not metadata_only and _session_has_pending_journal_retry(cached):
             try:

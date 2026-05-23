@@ -772,6 +772,29 @@ async function loadSession(sid){
       setComposerStatus('');
       updateQueueBadge(sid);
       syncTopbar();renderMessages();
+      // #custom-fix: Post-load visibility check — after rendering an idle session,
+      // verify the last text-bearing assistant message appears in the DOM. If not
+      // (stale server LRU cache, merge race), try one force-refresh from server.
+      (function _checkIdleSessionLastReply(){
+        try{
+          const _msgs=S.messages||[];
+          const _lastAsst=[..._msgs].reverse().find(m=>m&&m.role==='assistant'&&typeof m.content==='string'&&m.content.trim());
+          if(!_lastAsst) return;
+          const _text=String(_lastAsst.content).trim().slice(0,80);
+          const _inner=typeof $('msgInner')==='function'?$('msgInner'):null;
+          if(!_inner) return;
+          const _blocks=_inner.querySelectorAll('.assistant-turn .assistant-content, .assistant-turn .msg-text');
+          let _found=false;
+          for(const b of _blocks){
+            const bt=(b.textContent||'').replace(/\s+/g,' ').trim();
+            if(bt&&bt.includes(_text.replace(/\s+/g,' ').trim().slice(0,60))){_found=true;break;}
+          }
+          if(!_found){
+            console.warn('[hermes] last assistant reply not in DOM after idle load, force-refreshing session', sid);
+            loadSession(sid, {force: true});
+          }
+        }catch(_){}
+      })();
       if(typeof resumeManualCompressionForSession==='function') resumeManualCompressionForSession(sid);
       const _dirP=loadDir('.');
       await _dirP;
