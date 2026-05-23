@@ -1754,6 +1754,34 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           if(_markerOnlyAssistantError&&typeof showToast==='function') showToast('No response received after context compression. Please retry.',5000,'error');
           if(isSessionViewed) _markSessionViewed(completedSid, completedSession.message_count ?? S.messages.length);
           syncTopbar();renderMessages({preserveScroll:true});
+          // #custom-fix: Post-render visibility check — after renderMessages() rebuilds
+          // the DOM, verify the last text-bearing assistant message actually appears in
+          // the message pane. If the server's done payload was stale (LRU cache miss) or
+          // the merge dropped the trailing reply, inject a DOM node directly so the user
+          // never sees a blank response.
+          (function _verifyLastAssistantVisible(){
+            try{
+              const _lastAsst=S.messages&&[...S.messages].reverse().find(m=>m&&m.role==='assistant'&&typeof m.content==='string'&&m.content.trim());
+              if(!_lastAsst) return;
+              const _text=String(_lastAsst.content).trim();
+              const _inner=typeof $('msgInner')==='function'?$('msgInner'):null;
+              if(!_inner) return;
+              // Check if any .assistant-turn block contains this text (or a substantial prefix)
+              const _blocks=_inner.querySelectorAll('.assistant-turn .assistant-content, .assistant-turn .msg-text');
+              let _found=false;
+              for(const b of _blocks){
+                const bt=(b.textContent||'').replace(/\s+/g,' ').trim();
+                if(bt&&(_text.indexOf(bt.slice(0,80))>=0||bt.indexOf(_text.slice(0,80))>=0)){_found=true;break;}
+              }
+              if(_found) return;
+              // Not in DOM — inject it
+              const _div=document.createElement('div');
+              _div.className='assistant-turn';
+              _div.innerHTML='<div class="assistant-content"><div class="msg-text">'+(typeof renderMarkdown==='function'?renderMarkdown(_text):_text.replace(/</g,'&lt;'))+'</div></div>';
+              _inner.appendChild(_div);
+              if(typeof scrollToBottom==='function') scrollToBottom();
+            }catch(_){}
+          })();
           if(shouldFollowOnDone&&typeof scrollToBottom==='function') scrollToBottom();
           loadDir('.');
           // TTS auto-read: speak the last assistant response if enabled (#499)
