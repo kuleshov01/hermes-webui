@@ -367,13 +367,16 @@ def handle_transcribe(handler):
         with tempfile.NamedTemporaryFile(prefix='webui-stt-', suffix=suffix, delete=False) as tmp:
             temp_path = tmp.name
             tmp.write(file_bytes)
+
         try:
             from tools.transcription_tools import transcribe_audio
-        except ImportError:
+        except ImportError as _ie:
+            print(f'[webui] tools.transcription_tools ImportError: {_ie}', flush=True)
             return j(handler, {'error': 'Speech-to-text is unavailable on this server'}, status=503)
         result = transcribe_audio(temp_path)
         if not result.get('success'):
             msg = str(result.get('error') or 'Transcription failed')
+            print(f'[webui] transcribe_audio failed: {msg}', flush=True)
             status = 503 if 'unavailable' in msg.lower() or 'not configured' in msg.lower() else 400
             return j(handler, {'error': msg}, status=status)
         transcript = str(result.get('transcript') or '').strip()

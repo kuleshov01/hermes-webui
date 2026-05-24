@@ -657,6 +657,26 @@ class Session:
                 f"Reload with metadata_only=False before mutating state. "
                 f"See #1558."
             )
+        # ── Prune trailing empty _partial messages before persisting ─────────
+        # Streaming can leave _partial=True assistant messages with no visible
+        # content and no tool_calls at the tail of the messages array.  These
+        # are cancel/interrupt artefacts that the dedup in
+        # _merge_transcript_incremental handles in-memory but that still get
+        # flushed to disk on save().  On reload the frontend renders them as
+        # empty assistant bubbles, hiding the real last assistant response.
+        # Strip them here so they never reach the JSON file.
+        _msgs = self.messages
+        if _msgs:
+            while _msgs:
+                tail = _msgs[-1]
+                if not (isinstance(tail, dict)
+                        and tail.get('role') == 'assistant'
+                        and tail.get('_partial')
+                        and not str(tail.get('content') or '').strip()
+                        and not tail.get('tool_calls')
+                        and not tail.get('_partial_tool_calls')):
+                    break
+                _msgs.pop()
         if touch_updated_at:
             self.updated_at = time.time()
         # Write metadata fields first so load_metadata_only() can read them
@@ -4207,7 +4227,15 @@ def merge_session_messages_append_only(
         dedup_key = _session_message_dedup_key(msg)
         if dedup_key in seen_dedup_keys:
             continue
-        if max_sidecar_timestamp is not None and timestamp is not None and timestamp <= max_sidecar_timestamp:
+        # Compare timestamps floored to whole seconds.  Context compression
+        # restamps old messages with fractional timestamps (e.g. 1779595442.487)
+        # while the sidecar stores the same-second values as integers (1779595442).
+        # A raw float comparison treats the fractional version as "newer" and
+        # appends stale compaction remnants past the assistant tail, hiding the
+        # last reply in the UI.
+        _ts_sidecar = int(max_sidecar_timestamp) if max_sidecar_timestamp is not None else None
+        _ts_state = int(timestamp) if timestamp is not None else None
+        if _ts_sidecar is not None and _ts_state is not None and _ts_state <= _ts_sidecar:
             # For message_id keys the merge key is authoritative — skip if
             # already seen.  For legacy keys the dedup check above already
             # handled true duplicates; same-second distinct messages must
@@ -4230,8 +4258,8 @@ def merge_session_messages_append_only(
                 skipped_state_visible_counts[matched_visible_key] = skipped_count + 1
                 continue
         # State rows at or before the newest sidecar timestamp are normally
-        # assumed to have already been observed by the sidecar. The <= gate
-        # preserves sidecar-only ordering/metadata for equal timestamps and
+        # assumed to have already been observed by the sidecar.  The floored
+        # comparison above preserves sidecar-only ordering/metadata and
         # prevents duplicate legacy rows when timestamp precision differs
         # between stores. State rows whose visible content already exists in
         # the sidecar are also skipped even if state.db restamped them later
@@ -4241,9 +4269,9 @@ def merge_session_messages_append_only(
         # only when their visible content is not already present.
         if (
             key[0] != "message_id"
-            and max_sidecar_timestamp is not None
-            and timestamp is not None
-            and timestamp <= max_sidecar_timestamp
+            and _ts_sidecar is not None
+            and _ts_state is not None
+            and _ts_state <= _ts_sidecar
         ):
             continue
         seen_message_keys.add(key)
