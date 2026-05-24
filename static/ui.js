@@ -86,7 +86,7 @@ async function checkOfflineRecoveryNow(){
     _setOfflineChecking(true);
     const ok=await _probeOfflineRecovery();
     _setOfflineChecking(false);
-    if(ok){_stopOfflineProbeTimer();window.location.reload();return true;}
+    if(ok){_stopOfflineProbeTimer();/* #custom-fix: don't reload the entire page on offline recovery — just hide the banner */_offlineVisible=false;if(typeof hideOfflineBanner==='function')hideOfflineBanner();return true;}
     showOfflineBanner('network');
     return false;
   })();
