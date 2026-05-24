@@ -1792,6 +1792,25 @@ def _apply_core_sync_or_error_marker(
             if session.pending_attachments:
                 recovered['attachments'] = list(session.pending_attachments)
             _append_recovered_turn_to_context(session, recovered)
+        # #custom-fix: If the last message is already a recovery marker, don't
+        # insert another one. Prevents infinite marker insertion when WebUI
+        # restarts while a stream is active — _repair_stale_pending fires on
+        # every get_session() call and keeps appending duplicate markers.
+        if session.messages:
+            _last = session.messages[-1]
+            if (isinstance(_last, dict) and _last.get('role') == 'assistant'
+                    and 'Response interrupted' in str(_last.get('content', ''))):
+                # Already marked — just clear pending state without adding another marker
+                session.active_stream_id = None
+                session.pending_user_message = None
+                session.pending_attachments = []
+                session.pending_started_at = None
+                session.save(touch_updated_at=touch_updated_at)
+                logger.info(
+                    "Session %s: last message already a recovery marker — clearing pending state without duplicate",
+                    sid,
+                )
+                return True
         recovered_output = _append_journaled_partial_output(
             session,
             _stream_id,
