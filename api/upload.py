@@ -320,18 +320,21 @@ def handle_transcribe(handler):
         # #custom-fix: Use GigaAM v3 for fast Russian STT (falls back to whisper)
         try:
             transcript = _transcribe_gigaam(temp_path)
-            print(f'[webui] GigaAM transcription: "{transcript[:100]}"', flush=True)
-            return j(handler, {'ok': True, 'transcript': transcript})
+            if transcript is not None:
+                print(f'[webui] GigaAM transcription: "{transcript[:100]}"', flush=True)
+                return j(handler, {'ok': True, 'transcript': transcript or ''})
         except Exception as _gigaam_err:
             print(f'[webui] GigaAM failed ({_gigaam_err}), falling back to whisper', flush=True)
 
         try:
             from tools.transcription_tools import transcribe_audio
-        except ImportError:
+        except ImportError as _ie:
+            print(f'[webui] tools.transcription_tools ImportError: {_ie}', flush=True)
             return j(handler, {'error': 'Speech-to-text is unavailable on this server'}, status=503)
         result = transcribe_audio(temp_path)
         if not result.get('success'):
             msg = str(result.get('error') or 'Transcription failed')
+            print(f'[webui] transcribe_audio failed: {msg}', flush=True)
             status = 503 if 'unavailable' in msg.lower() or 'not configured' in msg.lower() else 400
             return j(handler, {'error': msg}, status=status)
         transcript = str(result.get('transcript') or '').strip()
