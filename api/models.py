@@ -3145,6 +3145,14 @@ def merge_session_messages_append_only(sidecar_messages: list, state_messages: l
             and timestamp <= max_sidecar_timestamp
         ):
             continue
+        # #custom-fix: Even message_id-keyed state.db rows must not be appended
+        # if their visible content already appears in the sidecar. Context
+        # compression restamps old messages with fractional timestamps that
+        # sort after the sidecar's integer timestamps, causing them to be
+        # treated as "newer" and appended past the assistant tail — hiding the
+        # last reply in the UI.
+        if visible_key in seen_visible_keys:
+            continue
         if key[0] == "message_id":
             seen_message_keys.add(key)
         seen_content_keys.add(_session_message_content_key(msg))
