@@ -3208,6 +3208,27 @@ async function copyLogsAll() {
 }
 
 // ── Insights panel ──
+// ── Week navigation state ──
+let _weekOffset = 0; // 0 = current week, -1 = last week, etc.
+
+function _getWeekDates(offset) {
+  const now = new Date();
+  const dow = now.getDay(); // 0=Sun .. 6=Sat
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((dow + 6) % 7) + (offset * 7));
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 0);
+  return { monday, sunday };
+}
+
+function _fmtShort(d) { return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }); }
+function _fmtISO(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+function _shiftWeek(dir) { _weekOffset -= dir; loadInsights(); }
+function _goThisWeek() { _weekOffset = 0; loadInsights(); }
+
 async function loadInsights(animate) {
   const box = $('insightsContent');
   const refreshBtn = $('insightsRefreshBtn');
@@ -3217,9 +3238,25 @@ async function loadInsights(animate) {
     refreshBtn.disabled = true;
   }
   const period = ($('insightsPeriod') || {}).value || '30';
+  const weekNav = $('weekNav');
+  const weekLabel = $('weekLabel');
+  const weekNext = $('weekNext');
+
+  // Build API URL
+  let url;
+  if (period === 'week') {
+    if (weekNav) weekNav.style.display = 'flex';
+    if (weekNext) weekNext.style.visibility = _weekOffset >= 0 ? 'hidden' : 'visible';
+    const { monday, sunday } = _getWeekDates(_weekOffset);
+    if (weekLabel) weekLabel.textContent = `${_fmtShort(monday)} – ${_fmtShort(sunday)}`;
+    url = `/api/insights?from=${_fmtISO(monday)}&to=${_fmtISO(sunday)}`;
+  } else {
+    if (weekNav) weekNav.style.display = 'none';
+    url = `/api/insights?days=${period}`;
+  }
   try {
     const [data, wikiStatus, skillUsage] = await Promise.all([
-      api(`/api/insights?days=${period}`),
+      api(url),
       api('/api/wiki/status').catch(err => ({status:'error', error: err.message || String(err)})),
       api('/api/skills/usage').catch(() => ({usage:{}, skill_names:[], total_invocations:0, unique_skills_used:0})),
     ]);
@@ -3510,7 +3547,7 @@ function _renderInsights(d, box, wikiStatus, skillUsage) {
     </div>
     ${dowHtml}
     ${hodHtml}
-    <div style="text-align:center;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">${esc(t('insights_footer').replace('{days}', d.period_days))}</div>
+    <div style="text-align:center;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">${esc(d.period_label ? d.period_label : t('insights_footer').replace('{days}', d.period_days))}</div>
   `;
 }
 
