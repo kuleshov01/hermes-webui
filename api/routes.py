@@ -2890,17 +2890,41 @@ def _handle_insights(handler, parsed) -> bool:
     import time as _time
 
     query = parse_qs(parsed.query)
-    try:
-        days = min(max(int(query.get("days", ["30"])[0]), 1), 365)
-    except (ValueError, TypeError):
-        days = 30
 
     now = _time.time()
     today = _time.localtime(now)
     today_midnight = _time.mktime((today.tm_year, today.tm_mon, today.tm_mday, 0, 0, 0, today.tm_wday, today.tm_yday, today.tm_isdst))
     day_secs = 86400
+
+    # Support date-range filtering via from/to (YYYY-MM-DD ISO strings).
+    # If present, they override the `days` parameter entirely.
+    _from_str = query.get("from", [None])[0]
+    _to_str = query.get("to", [None])[0]
+
+    # Compute days for footer display
+    try:
+        days = min(max(int(query.get("days", ["30"])[0]), 1), 365)
+    except (ValueError, TypeError):
+        days = 30
     first_day_ts = today_midnight - ((days - 1) * day_secs)
-    cutoff = first_day_ts
+
+    if _from_str:
+        try:
+            _from_date = _time.strptime(_from_str, "%Y-%m-%d")
+            cutoff = _time.mktime((_from_date.tm_year, _from_date.tm_mon, _from_date.tm_mday, 0, 0, 0, 0, 0, -1))
+        except (ValueError, TypeError):
+            cutoff = first_day_ts
+    else:
+        cutoff = first_day_ts
+
+    # Upper bound: if `to` is given, filter sessions before the day after `to`.
+    upper_ts = None
+    if _to_str:
+        try:
+            _to_date = _time.strptime(_to_str, "%Y-%m-%d")
+            upper_ts = _time.mktime((_to_date.tm_year, _to_date.tm_mon, _to_date.tm_mday, 23, 59, 59, 0, 0, -1))
+        except (ValueError, TypeError):
+            upper_ts = None
 
     def _safe_usage_int(value) -> int:
         try:
@@ -2939,6 +2963,8 @@ def _handle_insights(handler, parsed) -> bool:
         updated = entry.get("updated_at", 0) or 0
         # Session is relevant if it was created or updated within the calendar window.
         if max(created, updated) < cutoff:
+            continue
+        if upper_ts is not None and min(created, updated) > upper_ts:
             continue
         sessions_data.append(entry)
 
@@ -3017,22 +3043,44 @@ def _handle_insights(handler, parsed) -> bool:
     models_breakdown.sort(key=lambda r: (-r["cost"], -r["sessions"], r["model"]))
 
     daily_series = []
-    for i in range(days):
-        day_ts = first_day_ts + (i * day_secs)
-        day_key = _time.strftime("%Y-%m-%d", _time.localtime(day_ts))
-        bucket = daily_tokens.get(day_key, {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "sessions": 0,
-            "cost": 0.0,
-        })
-        daily_series.append({
-            "date": day_key,
-            "input_tokens": bucket["input_tokens"],
-            "output_tokens": bucket["output_tokens"],
-            "sessions": bucket["sessions"],
-            "cost": round(bucket["cost"], 6),
-        })
+    if _from_str:
+        # Date-range mode: iterate from cutoff to upper_ts (or today)
+        _ds_end = upper_ts or today_midnight + day_secs
+        _ds_start = cutoff
+        n_days = max(int((_ds_end - _ds_start) / day_secs), 1)
+        for i in range(n_days + 1):
+            day_ts = _ds_start + (i * day_secs)
+            day_key = _time.strftime("%Y-%m-%d", _time.localtime(day_ts))
+            bucket = daily_tokens.get(day_key, {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "sessions": 0,
+                "cost": 0.0,
+            })
+            daily_series.append({
+                "date": day_key,
+                "input_tokens": bucket["input_tokens"],
+                "output_tokens": bucket["output_tokens"],
+                "sessions": bucket["sessions"],
+                "cost": round(bucket["cost"], 6),
+            })
+    else:
+        for i in range(days):
+            day_ts = first_day_ts + (i * day_secs)
+            day_key = _time.strftime("%Y-%m-%d", _time.localtime(day_ts))
+            bucket = daily_tokens.get(day_key, {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "sessions": 0,
+                "cost": 0.0,
+            })
+            daily_series.append({
+                "date": day_key,
+                "input_tokens": bucket["input_tokens"],
+                "output_tokens": bucket["output_tokens"],
+                "sessions": bucket["sessions"],
+                "cost": round(bucket["cost"], 6),
+            })
 
     # Day-of-week labels
     dow_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -3043,6 +3091,7 @@ def _handle_insights(handler, parsed) -> bool:
 
     return j(handler, {
         "period_days": days,
+        "period_label": _from_str and f"{_from_str} – {_to_str or ''}" or None,
         "total_sessions": total_sessions,
         "total_messages": total_messages,
         "total_input_tokens": total_input_tokens,

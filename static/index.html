@@ -272,11 +272,18 @@
       </div>
       <div class="panel-head-sub" style="padding:0 12px 8px">
         <select id="insightsPeriod" onchange="loadInsights()" style="width:100%;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px">
+          <option value="week" id="optWeek">This week</option>
           <option value="7">7 days</option>
           <option value="30" selected>30 days</option>
           <option value="90">90 days</option>
           <option value="365">365 days</option>
         </select>
+        <div id="weekNav" style="display:none;align-items:center;justify-content:center;gap:6px;margin-top:6px">
+          <button id="weekPrev" onclick="_shiftWeek(1)" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:14px;cursor:pointer;line-height:1">◀</button>
+          <span id="weekLabel" style="font-size:11px;color:var(--muted);min-width:140px;text-align:center"></span>
+          <button id="weekNext" onclick="_shiftWeek(-1)" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:14px;cursor:pointer;line-height:1">▶</button>
+          <button id="weekToday" onclick="_goThisWeek()" style="background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;line-height:1;margin-left:2px">Today</button>
+        </div>
       </div>
     </div>
     <!-- Workspaces panel -->

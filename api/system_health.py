@@ -1,21 +1,28 @@
 """Safe aggregate host resource metrics for the WebUI VPS panel (#693).
 
-The browser only needs coarse CPU/RAM/disk usage. Keep this module intentionally
-small and dependency-free: no process lists, command strings, user identities,
-environment variables, or filesystem topology leave the server.
+The browser only needs coarse CPU/RAM/disk usage. Uses psutil when available
+(Linux, macOS, Windows) with a /proc/stat fallback for Linux without psutil.
 """
 
 from __future__ import annotations
 
 import shutil
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+_HAS_PSUTIL = False
+try:
+    import psutil as _psutil
+    _HAS_PSUTIL = True
+except ImportError:
+    _psutil = None
 
 _PROC_STAT = Path("/proc/stat")
 _PROC_MEMINFO = Path("/proc/meminfo")
+_IS_LINUX = sys.platform.startswith("linux")
 _CPU_SAMPLE_SECONDS = 0.05
 
 
@@ -33,6 +40,12 @@ def _clamp_percent(value: Any) -> float:
     if numeric > 100:
         numeric = 100.0
     return round(numeric, 1)
+
+
+# ── CPU ──
+
+def _cpu_percent_psutil() -> float:
+    return _psutil.cpu_percent(interval=_CPU_SAMPLE_SECONDS)
 
 
 def _read_proc_stat_cpu() -> tuple[int, int]:
@@ -60,16 +73,32 @@ def _cpu_delta_percent(start: tuple[int, int], end: tuple[int, int]) -> float:
     return _clamp_percent((busy_delta / total_delta) * 100.0)
 
 
-def _cpu_percent() -> float:
-    """Sample aggregate CPU usage without psutil.
-
-    A short local sample avoids storing cross-request state and returns a stable
-    percentage on the first poll. Unsupported platforms raise a safe error code.
-    """
+def _cpu_percent_proc() -> float:
+    """Sample aggregate CPU usage from /proc/stat (Linux only)."""
     start = _read_proc_stat_cpu()
     time.sleep(_CPU_SAMPLE_SECONDS)
     end = _read_proc_stat_cpu()
     return _cpu_delta_percent(start, end)
+
+
+def _cpu_percent() -> float:
+    """Sample aggregate CPU usage."""
+    if _HAS_PSUTIL:
+        return _cpu_percent_psutil()
+    if _IS_LINUX:
+        return _cpu_percent_proc()
+    raise RuntimeError("unsupported_platform")
+
+
+# ── Memory ──
+
+def _memory_usage_psutil() -> dict[str, int | float]:
+    mem = _psutil.virtual_memory()
+    return {
+        "used_bytes": int(mem.used),
+        "total_bytes": int(mem.total),
+        "percent": _clamp_percent(mem.percent),
+    }
 
 
 def _read_meminfo_kib() -> dict[str, int]:
@@ -89,7 +118,7 @@ def _read_meminfo_kib() -> dict[str, int]:
     return data
 
 
-def _memory_usage() -> dict[str, int | float]:
+def _memory_usage_proc() -> dict[str, int | float]:
     meminfo = _read_meminfo_kib()
     total = int(meminfo.get("MemTotal") or 0) * 1024
     if total <= 0:
@@ -112,6 +141,17 @@ def _memory_usage() -> dict[str, int | float]:
     }
 
 
+def _memory_usage() -> dict[str, int | float]:
+    """Report memory usage."""
+    if _HAS_PSUTIL:
+        return _memory_usage_psutil()
+    if _IS_LINUX:
+        return _memory_usage_proc()
+    raise RuntimeError("unsupported_platform")
+
+
+# ── Disk (cross-platform via shutil) ──
+
 def _disk_usage() -> dict[str, int | float]:
     usage = shutil.disk_usage("/")
     total = int(usage.total)
@@ -125,11 +165,13 @@ def _disk_usage() -> dict[str, int | float]:
     }
 
 
+# ── Safe error reporting ──
+
 def _safe_error(metric: str, exc: Exception) -> dict[str, str]:
-    # Keep this intentionally coarse. Exception messages can contain local paths
-    # on unusual platforms; the browser only needs a safe unavailable reason.
     return {"metric": metric, "code": type(exc).__name__}
 
+
+# ── Public entry point ──
 
 def build_system_health_payload() -> dict[str, Any]:
     metrics: dict[str, Any] = {"cpu": None, "memory": None, "disk": None}
