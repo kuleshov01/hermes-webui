@@ -3045,6 +3045,78 @@ def _handle_insights(handler, parsed) -> bool:
         })
     models_breakdown.sort(key=lambda r: (-r["cost"], -r["sessions"], r["model"]))
 
+    # ── Auxiliary usage from aux_usage.jsonl ──
+    try:
+        from api.profiles import get_active_hermes_home
+        _insights_home = Path(get_active_hermes_home()).expanduser()
+    except Exception:
+        _insights_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+    aux_usage_path = _insights_home / "aux_usage.jsonl"
+    aux_tasks: dict[str, dict] = {}
+    if aux_usage_path.exists():
+        try:
+            import time as _aux_time
+            _aux_now = _aux_time.time()
+            _aux_max_lines = 50000  # safety cap
+            _aux_count = 0
+            with open(aux_usage_path, "r", encoding="utf-8") as _af:
+                for _aline in _af:
+                    if _aux_count >= _aux_max_lines:
+                        break
+                    _aux_count += 1
+                    _aline = _aline.strip()
+                    if not _aline:
+                        continue
+                    try:
+                        _ae = json.loads(_aline)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    _ae_ts = _ae.get("ts", 0)
+                    if _ae_ts < cutoff:
+                        continue
+                    if upper_ts is not None and _ae_ts > upper_ts:
+                        continue
+                    _ae_task = _ae.get("task") or "unknown"
+                    _ae_in = _safe_usage_int(_ae.get("prompt_tokens"))
+                    _ae_out = _safe_usage_int(_ae.get("completion_tokens"))
+                    _bucket = aux_tasks.setdefault(_ae_task, {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0, "model": _ae.get("model", "")})
+                    _bucket["prompt_tokens"] += _ae_in
+                    _bucket["completion_tokens"] += _ae_out
+                    _bucket["calls"] += 1
+            # Truncate file if it grew too large (keep last 50000 lines)
+            if _aux_count > 45000:
+                try:
+                    _lines = open(aux_usage_path, "r", encoding="utf-8").readlines()
+                    with open(aux_usage_path, "w", encoding="utf-8") as _wf:
+                        _wf.writelines(_lines[-20000:])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    aux_breakdown = None
+    if aux_tasks:
+        _aux_total_in = sum(b["prompt_tokens"] for b in aux_tasks.values())
+        _aux_total_out = sum(b["completion_tokens"] for b in aux_tasks.values())
+        _aux_total = _aux_total_in + _aux_total_out
+        aux_breakdown = {
+            "tasks": [
+                {
+                    "task": t,
+                    "prompt_tokens": b["prompt_tokens"],
+                    "completion_tokens": b["completion_tokens"],
+                    "total_tokens": b["prompt_tokens"] + b["completion_tokens"],
+                    "calls": b["calls"],
+                    "model": b["model"],
+                    "token_share": int(round((b["prompt_tokens"] + b["completion_tokens"]) / _aux_total * 100)) if _aux_total else 0,
+                }
+                for t, b in sorted(aux_tasks.items(), key=lambda x: -(x[1]["prompt_tokens"] + x[1]["completion_tokens"]))
+            ],
+            "total_prompt_tokens": _aux_total_in,
+            "total_completion_tokens": _aux_total_out,
+            "total_tokens": _aux_total,
+            "total_calls": sum(b["calls"] for b in aux_tasks.values()),
+        }
+
     daily_series = []
     if _from_str:
         # Date-range mode: iterate from cutoff to upper_ts (or today)
@@ -3105,6 +3177,7 @@ def _handle_insights(handler, parsed) -> bool:
         "daily_tokens": daily_series,
         "activity_by_day": dow_data,
         "activity_by_hour": hod_data,
+        "aux_breakdown": aux_breakdown,
     })
 
 

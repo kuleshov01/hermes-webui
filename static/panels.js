@@ -3239,6 +3239,20 @@ function _renderInsights(d, box, wikiStatus) {
       </div>
     </div>`;
 
+  // Auxiliary tasks breakdown
+  let auxHtml = '';
+  if (d.aux_breakdown && d.aux_breakdown.tasks && d.aux_breakdown.tasks.length) {
+    const ab = d.aux_breakdown;
+    auxHtml = `<div class="insights-card">
+      <div class="insights-card-title">${esc(t('insights_aux_tasks'))}</div>
+      <div style="margin-bottom:6px;font-size:11px;color:var(--muted)">${fmtTokens(ab.total_tokens)} ${esc(t('insights_aux_total'))} · ${fmtNum(ab.total_calls)} ${esc(t('insights_aux_calls'))}</div>
+      <div class="insights-table insights-model-table"><div class="insights-table-head"><span>${esc(t('insights_aux_task'))}</span><span>${esc(t('insights_aux_calls'))}</span><span>${esc(t('insights_model_tokens'))}</span><span>%</span></div>` +
+      ab.tasks.map(r => {
+        return `<div class="insights-table-row"><span class="insights-model-name">${esc(r.task)}</span><span>${fmtNum(r.calls)}</span><span class="insights-model-tokens">${fmtTokens(r.total_tokens)}</span><span>${r.token_share}%</span></div>`;
+      }).join('') +
+      `</div></div>`;
+  }
+
   box.innerHTML = `
     ${_renderSystemHealthPanel()}
     ${_renderLlmWikiStatus(wikiStatus)}
@@ -3250,6 +3264,7 @@ function _renderInsights(d, box, wikiStatus) {
       ${tokenCards}
       ${modelsHtml}
     </div>
+    ${auxHtml}
     ${dowHtml}
     ${hodHtml}
     <div style="text-align:center;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">${esc(d.period_label ? d.period_label : t('insights_footer').replace('{days}', d.period_days))}</div>
