@@ -3045,6 +3045,35 @@ def _handle_insights(handler, parsed) -> bool:
         })
     models_breakdown.sort(key=lambda r: (-r["cost"], -r["sessions"], r["model"]))
 
+    # ── Chat vs Background split ──
+    # Read the auxiliary model from config; tokens on that model are "background".
+    try:
+        aux_cfg = get_auxiliary_model_config()
+        aux_model_name = (aux_cfg.get("model") or "").strip()
+    except Exception:
+        aux_model_name = ""
+    chat_tokens = 0
+    bg_tokens = 0
+    chat_sessions = 0
+    bg_sessions = 0
+    chat_cost = 0.0
+    bg_cost = 0.0
+    if aux_model_name:
+        for row in models_breakdown:
+            if row["model"] == aux_model_name or row["model"].endswith("/" + aux_model_name):
+                bg_tokens += row["total_tokens"]
+                bg_sessions += row["sessions"]
+                bg_cost += row["cost"]
+            else:
+                chat_tokens += row["total_tokens"]
+                chat_sessions += row["sessions"]
+                chat_cost += row["cost"]
+    usage_split = {
+        "auxiliary_model": aux_model_name or None,
+        "chat": {"tokens": chat_tokens, "sessions": chat_sessions, "cost": round(chat_cost, 6)},
+        "background": {"tokens": bg_tokens, "sessions": bg_sessions, "cost": round(bg_cost, 6)},
+    } if aux_model_name else None
+
     daily_series = []
     if _from_str:
         # Date-range mode: iterate from cutoff to upper_ts (or today)
@@ -3105,6 +3134,7 @@ def _handle_insights(handler, parsed) -> bool:
         "daily_tokens": daily_series,
         "activity_by_day": dow_data,
         "activity_by_hour": hod_data,
+        "usage_split": usage_split,
     })
 
 
