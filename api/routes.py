@@ -994,6 +994,18 @@ def _clear_stale_stream_state(session) -> bool:
     if stream_alive:
         return False
 
+    # #custom-fix: If pending_user_message is also None, the session is
+    # already fully settled.  Do NOT reload+save — this avoids a
+    # _repair_stale_pending → _apply_core_sync_or_error_marker → save()
+    # chain that can overwrite the JSON with stale data.
+    _pending_msg = getattr(session, "pending_user_message", None)
+    _pending_att = getattr(session, "pending_attachments", None)
+    if not _pending_msg and not _pending_att:
+        with STREAMS_LOCK:
+            if stream_id not in STREAMS:
+                session.active_stream_id = None
+                return False
+
     # ── #1558 P0 safety: if we were handed a metadata-only stub, reload the
     # full session before touching persisted state. The original
     # metadata-only object is left untouched so the caller's read path is

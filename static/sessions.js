@@ -1278,7 +1278,7 @@ let _messagesTruncated = false;
 // Handles streaming sessions specially: restores from INFLIGHT cache or API.
 // msg_limit (default 30): only fetch the last N messages for fast switching.
 // Older messages are loaded on-demand via _loadOlderMessages().
-const _INITIAL_MSG_LIMIT = 30;
+const _INITIAL_MSG_LIMIT = 100;
 
 async function _ensureMessagesLoaded(sid) {
   // Already have messages? (e.g. from INFLIGHT restore path, already set)

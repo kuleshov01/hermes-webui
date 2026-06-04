@@ -2088,7 +2088,15 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       const data=await api(`/api/session?session_id=${encodeURIComponent(activeSid)}`);
       const session=data&&data.session;
       if(!session) return false;
-      if(session.active_stream_id||session.pending_user_message) return false;
+      // #custom-fix: If session reports active stream, check if it's actually alive.
+      // Gateway crash can leave stale active_stream_id that blocks session restore.
+      if(session.active_stream_id||session.pending_user_message){
+        try{
+          const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(session.active_stream_id||'')}`);
+          if(st&&st.active) return false; // stream genuinely alive
+        }catch(_){}
+        // Stream dead but state stale — clear and fall through to restore
+      }
       _clearOwnerInflightState();
       _closeSource();
       _clearApprovalForOwner();
@@ -2156,7 +2164,17 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       const staleTurn=document.getElementById('liveAssistantTurn');
       if(staleTurn) staleTurn.remove();
       if(typeof renderCompressionUi==='function') renderCompressionUi();
-      S.messages.push({role:'assistant',content:'**Error:** Connection lost'});renderMessages({preserveScroll:true});
+      S.messages.push({role:'assistant',content:'**Error:** Connection lost'});
+      // #custom-fix: Load fresh messages from server instead of stale S.messages
+      api(`/api/session?session_id=${encodeURIComponent(activeSid)}`).then(data=>{
+        if(data&&data.session&&Array.isArray(data.session.messages)){
+          S.session=data.session;
+          S.messages=data.session.messages.filter(m=>m&&m.role);
+          renderMessages({preserveScroll:true});
+          _markSessionViewed(activeSid, S.messages.length);
+        }
+      }).catch(()=>{});
+      renderMessages({preserveScroll:true});
       _markSessionViewed(activeSid, S.messages.length);
     }else{
       if(typeof trackBackgroundError==='function'){
