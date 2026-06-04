@@ -6601,6 +6601,19 @@ def _run_agent_streaming(
             except Exception as _goal_exc:
                 logger.debug("Goal continuation hook failed for session %s: %s", session_id, _goal_exc)
             raw_session = s.compact() | {'messages': s.messages, 'tool_calls': tool_calls}
+            # Enrich with lineage metadata so the compression done event carries
+            # _lineage_root_id — without this the child session upserted into
+            # _allSessions lacks the grouping key and causes a duplicate sidebar row.
+            try:
+                from api.models import _active_state_db_path
+                from api.agent_sessions import read_session_lineage_metadata
+                _sid = raw_session.get('session_id', '') or ''
+                if _sid:
+                    _m = read_session_lineage_metadata(_active_state_db_path(), {_sid})
+                    if _m.get(_sid):
+                        raw_session.update(_m[_sid])
+            except Exception:
+                pass
             put('done', {'session': redact_session_data(raw_session), 'usage': usage})
             # Emit one last metering packet for the live message-header TPS label.
             meter_stats = meter().get_stats()
