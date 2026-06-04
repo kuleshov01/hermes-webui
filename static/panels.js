@@ -5159,6 +5159,7 @@ let _settingsThemeOnOpen = null; // track theme at open time for discard revert
 let _settingsSkinOnOpen = null; // track skin at open time for discard revert
 let _settingsFontSizeOnOpen = null; // track font size at open time for discard revert
 let _settingsHermesDefaultModelOnOpen = '';
+let _settingsAuxiliaryModelOnOpen = '';
 let _settingsSection = 'conversation';
 let _currentSettingsSection = 'conversation';
 let _settingsAppearanceAutosaveTimer = null;
@@ -5555,7 +5556,9 @@ async function _autosavePreferencesSettings(payload){
     const pwDirty=!!(pwField&&pwField.value);
     const modelSel=$('settingsModel');
     const modelDirty=!!(modelSel&&((modelSel.value||'')!==(_settingsHermesDefaultModelOnOpen||'')));
-    if(!pwDirty&&!modelDirty){
+    const auxModelSel=$('settingsAuxiliaryModel');
+    const auxModelDirty=!!(auxModelSel&&((auxModelSel.value||'')!==(_settingsAuxiliaryModelOnOpen||'')));
+    if(!pwDirty&&!modelDirty&&!auxModelDirty){
       _settingsDirty=false;
       const bar=$('settingsUnsavedBar');
       if(bar) bar.style.display='none';
@@ -5694,6 +5697,41 @@ async function loadSettingsPanel(){
         modelSel.value=_settingsHermesDefaultModelOnOpen;
       }
       modelSel.addEventListener('change',_markSettingsDirty,{once:false});
+    }
+    // Populate auxiliary (background) model dropdown — same model list
+    const auxModelSel=$('settingsAuxiliaryModel');
+    if(auxModelSel){
+      auxModelSel.innerHTML='';
+      // "None (use chat model)" placeholder option
+      const noneOpt=document.createElement('option');
+      noneOpt.value='';noneOpt.textContent='— '+t('settings_aux_none')+' —';
+      auxModelSel.appendChild(noneOpt);
+      // Clone the same optgroups from the model dropdown
+      if(modelSel){
+        for(const g of modelSel.querySelectorAll('optgroup')){
+          const og=document.createElement('optgroup');
+          og.label=g.label;if(g.dataset.provider) og.dataset.provider=g.dataset.provider;
+          for(const m of g.querySelectorAll('option')){
+            const opt=document.createElement('option');
+            opt.value=m.value;opt.textContent=m.textContent;
+            og.appendChild(opt);
+          }
+          auxModelSel.appendChild(og);
+        }
+      }
+      // Load current auxiliary model config
+      try{
+        const auxCfg=await api('/api/auxiliary-model');
+        _settingsAuxiliaryModelOnOpen=(auxCfg&&auxCfg.model)||'';
+        if(_settingsAuxiliaryModelOnOpen){
+          if(typeof _applyModelToDropdown==='function'){
+            _applyModelToDropdown(_settingsAuxiliaryModelOnOpen, auxModelSel, (models&&models.active_provider)||window._activeProvider||null);
+          }else{
+            auxModelSel.value=_settingsAuxiliaryModelOnOpen;
+          }
+        }
+      }catch(_e){}
+      auxModelSel.addEventListener('change',_markSettingsDirty,{once:false});
     }
     // Send key preference
     const sendKeySel=$('settingsSendKey');
@@ -6581,6 +6619,9 @@ function _applySavedSettingsUi(saved, body, opts){
   const bar=$('settingsUnsavedBar');
   if(bar) bar.style.display='none';
   _settingsHermesDefaultModelOnOpen=body.default_model||_settingsHermesDefaultModelOnOpen||'';
+  // Sync auxiliary model on-open tracker
+  const _auxSel=($('settingsAuxiliaryModel')||{});
+  if(_auxSel.value) _settingsAuxiliaryModelOnOpen=_auxSel.value;
   // Sync window._defaultModel so newSession() uses the just-saved default without a reload (#908).
   if(body.default_model) window._defaultModel=body.default_model;
   if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
@@ -6711,6 +6752,15 @@ async function saveSettings(andClose){
           if(typeof showToast==='function') showToast('Failed to update default model — settings saved');
         }
       }
+      // Auxiliary (background) model
+      const auxModel=($('settingsAuxiliaryModel')||{}).value;
+      if(auxModel && auxModel!==(_settingsAuxiliaryModelOnOpen||'')){
+        try{
+          await api('/api/auxiliary-model',{method:'POST',body:JSON.stringify({provider:'',model:auxModel})});
+        }catch(_auxErr){
+          if(typeof showToast==='function') showToast('Failed to update auxiliary model — settings saved');
+        }
+      }
       _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showQuotaChip,showTps,fadeTextEffect,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
       showToast(t(saved.auth_just_enabled?'settings_saved_pw':'settings_saved_pw_updated'));
       _settingsDirty=false;
@@ -6728,6 +6778,15 @@ async function saveSettings(andClose){
         body.default_model=model;
       }catch(_modelErr){
         if(typeof showToast==='function') showToast('Failed to update default model — settings saved');
+      }
+    }
+    // Auxiliary (background) model
+    var auxModel2=($('settingsAuxiliaryModel')||{}).value;
+    if(auxModel2 && auxModel2!==(_settingsAuxiliaryModelOnOpen||'')){
+      try{
+        await api('/api/auxiliary-model',{method:'POST',body:JSON.stringify({provider:'',model:auxModel2})});
+      }catch(_auxErr2){
+        if(typeof showToast==='function') showToast('Failed to update auxiliary model — settings saved');
       }
     }
     _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showQuotaChip,showTps,fadeTextEffect,showCliSessions,theme,skin,language,sidebarDensity,fontSize});

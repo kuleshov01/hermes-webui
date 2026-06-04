@@ -2151,6 +2151,80 @@ def set_hermes_default_model(model_id: str) -> dict:
     return {"ok": True, "model": persisted_model}
 
 
+def get_auxiliary_model_config() -> dict:
+    """Read the current auxiliary model override from config.yaml.
+
+    Returns ``{"provider": ..., "model": ...}`` if a user-set override exists,
+    otherwise ``{"provider": "", "model": ""}``.
+    """
+    config_data = _load_yaml_config_file(_get_config_path())
+    aux = config_data.get("auxiliary", {})
+    # Scan the non-vision auxiliary tasks; they should all share the same
+    # provider/model when managed by the WebUI.  Pick the first non-vision
+    # entry that has an explicit provider set (not "auto").
+    for task_name in ("web_extract", "compression", "skills_hub", "approval",
+                      "mcp", "title_generation", "triage_specifier",
+                      "kanban_decomposer", "profile_describer", "curator"):
+        task_cfg = aux.get(task_name, {})
+        if isinstance(task_cfg, dict) and str(task_cfg.get("provider", "")).strip() not in ("", "auto"):
+            return {
+                "provider": str(task_cfg.get("provider", "")).strip(),
+                "model": str(task_cfg.get("model", "")).strip(),
+            }
+    return {"provider": "", "model": ""}
+
+
+_AUXILIARY_TASK_NAMES = (
+    "web_extract", "compression", "skills_hub", "approval", "mcp",
+    "title_generation", "triage_specifier", "kanban_decomposer",
+    "profile_describer", "curator",
+)
+
+
+def set_auxiliary_model_config(provider: str, model: str) -> dict:
+    """Set the auxiliary (background) model for all non-vision tasks.
+
+    Writes the chosen *provider* and *model* into every non-vision entry in
+    the ``auxiliary:`` block of ``config.yaml`` so that background tasks
+    (compression, web_extract, title_generation, …) always use a
+    user-selected model regardless of the active chat model.
+    """
+    provider = str(provider or "").strip()
+    model = str(model or "").strip()
+    if not model:
+        raise ValueError("model is required")
+
+    # Resolve @provider:model prefix (e.g. @zai:glm-5-turbo → provider=zai)
+    resolved_model, resolved_provider, _resolved_base_url = resolve_model_provider(model)
+    persisted_provider = str(
+        resolved_provider or provider or ""
+    ).strip()
+    persisted_model = str(resolved_model or model).strip()
+    if persisted_provider.lower() == "local":
+        persisted_provider = "custom"
+
+    config_path = _get_config_path()
+    with _cfg_lock:
+        config_data = _load_yaml_config_file(config_path)
+        aux = config_data.get("auxiliary", {})
+        if not isinstance(aux, dict):
+            aux = {}
+
+        for task_name in _AUXILIARY_TASK_NAMES:
+            task_cfg = aux.get(task_name, {})
+            if not isinstance(task_cfg, dict):
+                task_cfg = {}
+            task_cfg["provider"] = persisted_provider
+            task_cfg["model"] = persisted_model
+            aux[task_name] = task_cfg
+
+        config_data["auxiliary"] = aux
+        _save_yaml_config_file(config_path, config_data)
+    reload_config()
+    invalidate_models_cache()
+    return {"ok": True, "provider": persisted_provider, "model": persisted_model}
+
+
 # ── TTL cache for get_available_models() ─────────────────────────────────────
 _available_models_cache: dict | None = None
 _available_models_cache_ts: float = 0.0

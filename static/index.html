@@ -1003,6 +1003,11 @@
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_model">Used for new conversations. Existing conversations keep their selected model.</div>
             </div>
             <div class="settings-field">
+              <label for="settingsAuxiliaryModel" data-i18n="settings_label_auxiliary_model">Auxiliary (Background) Model</label>
+              <select id="settingsAuxiliaryModel" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px"></select>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_auxiliary_model">Model for background tasks (compression, web extraction, titles, etc.). Set independently from the chat model so research models don't burn tokens on housekeeping.</div>
+            </div>
+            <div class="settings-field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="settingsHideSuggestions" style="width:15px;height:15px;accent-color:var(--accent)">
                 <span data-i18n="settings_label_hide_suggestions">Hide new-chat suggestions</span>
