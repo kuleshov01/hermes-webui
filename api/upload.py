@@ -348,6 +348,34 @@ def handle_upload_extract(handler):
         return j(handler, {'error': 'Archive extraction failed'}, status=500)
 
 
+# ── GigaAM v3 STT (fast Russian speech recognition) ──────────────────────────
+_gigaam_model = None
+
+def _transcribe_gigaam(audio_path):
+    """Transcribe using GigaAM v3 (ONNX, CPU). Returns transcript str or None."""
+    global _gigaam_model
+    import subprocess, tempfile, os
+    # Convert to 16kHz mono WAV if needed
+    ext = os.path.splitext(audio_path)[1].lower()
+    if ext != '.wav':
+        wav_path = tempfile.mktemp(suffix='.wav')
+        subprocess.run(
+            ['ffmpeg', '-y', '-i', audio_path, '-ar', '16000', '-ac', '1', '-f', 'wav', wav_path],
+            capture_output=True, timeout=10
+        )
+    else:
+        wav_path = audio_path
+    try:
+        if _gigaam_model is None:
+            import onnx_asr
+            _gigaam_model = onnx_asr.load_model('gigaam-v3-ctc', providers=['CPUExecutionProvider'])
+        result = _gigaam_model.recognize(wav_path)
+        return result if isinstance(result, str) else str(result)
+    finally:
+        if ext != '.wav' and os.path.exists(wav_path):
+            os.unlink(wav_path)
+
+
 def handle_transcribe(handler):
     import traceback as _tb
     temp_path = None
@@ -367,6 +395,15 @@ def handle_transcribe(handler):
         with tempfile.NamedTemporaryFile(prefix='webui-stt-', suffix=suffix, delete=False) as tmp:
             temp_path = tmp.name
             tmp.write(file_bytes)
+
+        # Try GigaAM v3 first (fast Russian STT), fall back to whisper
+        try:
+            transcript = _transcribe_gigaam(temp_path)
+            if transcript is not None:
+                print(f'[webui] GigaAM transcription: "{transcript[:100]}"', flush=True)
+                return j(handler, {'ok': True, 'transcript': transcript or ''})
+        except Exception as _gigaam_err:
+            print(f'[webui] GigaAM failed ({_gigaam_err}), falling back to whisper', flush=True)
 
         try:
             from tools.transcription_tools import transcribe_audio
