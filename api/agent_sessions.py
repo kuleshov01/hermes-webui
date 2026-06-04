@@ -779,4 +779,10 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
             entry['_lineage_root_id'] = root_id
             entry['_compression_segment_count'] = segment_count
 
+        # Mark the lineage root itself so it shares the same grouping key
+        # as its children in _collapseSessionLineageForSidebar (#2489).
+        root_entry = metadata.setdefault(root_id, {})
+        if '_lineage_root_id' not in root_entry:
+            root_entry['_lineage_root_id'] = root_id
+
     return metadata
