@@ -2570,114 +2570,78 @@ def set_hermes_default_model(model_id: str) -> dict:
     return {"ok": True, "model": persisted_model}
 
 
-# ── Auxiliary model configuration ──────────────────────────────────────────
+def get_auxiliary_model_config() -> dict:
+    """Read the current auxiliary model override from config.yaml.
 
-# Canonical auxiliary task slots. Keep in sync with hermes_cli/config.py
-# DEFAULT_CONFIG["auxiliary"] and hermes_cli/web_server.py _AUX_TASK_SLOTS.
-AUX_TASK_SLOTS: tuple[str, ...] = (
- "vision",
- "web_extract",
- "compression",
- "session_search",
- "skills_hub",
- "approval",
- "mcp",
- "title_generation",
- "curator",
+    Returns ``{"provider": ..., "model": ...}`` if a user-set override exists,
+    otherwise ``{"provider": "", "model": ""}``.
+    """
+    config_data = _load_yaml_config_file(_get_config_path())
+    aux = config_data.get("auxiliary", {})
+    # Scan the non-vision auxiliary tasks; they should all share the same
+    # provider/model when managed by the WebUI.  Pick the first non-vision
+    # entry that has an explicit provider set (not "auto").
+    for task_name in ("web_extract", "compression", "skills_hub", "approval",
+                      "mcp", "title_generation", "triage_specifier",
+                      "kanban_decomposer", "profile_describer", "curator"):
+        task_cfg = aux.get(task_name, {})
+        if isinstance(task_cfg, dict) and str(task_cfg.get("provider", "")).strip() not in ("", "auto"):
+            return {
+                "provider": str(task_cfg.get("provider", "")).strip(),
+                "model": str(task_cfg.get("model", "")).strip(),
+            }
+    return {"provider": "", "model": ""}
+
+
+_AUXILIARY_TASK_NAMES = (
+    "web_extract", "compression", "skills_hub", "approval", "mcp",
+    "title_generation", "triage_specifier", "kanban_decomposer",
+    "profile_describer", "curator",
 )
 
 
-def get_auxiliary_models() -> dict:
-    """Return current auxiliary task assignments from config.yaml.
+def set_auxiliary_model_config(provider: str, model: str) -> dict:
+    """Set the auxiliary (background) model for all non-vision tasks.
 
-    Shape:
-    {
-        "tasks": [
-            {"task": "vision", "provider": "auto", "model": "", "base_url": ""},
-            ...
-        ],
-        "main": {"provider": "openrouter", "model": "anthropic/claude-opus-4.7"},
-    }
+    Writes the chosen *provider* and *model* into every non-vision entry in
+    the ``auxiliary:`` block of ``config.yaml`` so that background tasks
+    (compression, web_extract, title_generation, …) always use a
+    user-selected model regardless of the active chat model.
     """
-    reload_config()
-    model_cfg = cfg.get("model", {})
-    if not isinstance(model_cfg, dict):
-        model_cfg = {}
-    main_provider = str(model_cfg.get("provider") or "").strip()
-    main_model = str(model_cfg.get("default") or model_cfg.get("name") or "").strip()
+    provider = str(provider or "").strip()
+    model = str(model or "").strip()
+    if not model:
+        raise ValueError("model is required")
 
-    aux_cfg = cfg.get("auxiliary", {})
-    if not isinstance(aux_cfg, dict):
-        aux_cfg = {}
+    # Resolve @provider:model prefix (e.g. @zai:glm-5-turbo → provider=zai)
+    resolved_model, resolved_provider, _resolved_base_url = resolve_model_provider(model)
+    persisted_provider = str(
+        resolved_provider or provider or ""
+    ).strip()
+    persisted_model = str(resolved_model or model).strip()
+    if persisted_provider.lower() == "local":
+        persisted_provider = "custom"
 
-    tasks = []
-    for slot in AUX_TASK_SLOTS:
-        entry = aux_cfg.get(slot, {})
-        if not isinstance(entry, dict):
-            entry = {}
-        tasks.append({
-            "task": slot,
-            "provider": str(entry.get("provider") or "auto").strip(),
-            "model": str(entry.get("model") or "").strip(),
-            "base_url": str(entry.get("base_url") or "").strip(),
-        })
-
-    return {
-        "tasks": tasks,
-        "main": {"provider": main_provider, "model": main_model},
-    }
-
-
-def set_auxiliary_model(task: str, provider: str, model: str) -> dict:
-    """Persist an auxiliary model assignment in config.yaml.
-
-    Special case: task='__reset__' clears all auxiliary slots.
-    """
-    if task != "__reset__" and task not in AUX_TASK_SLOTS:
-        raise ValueError(
-            f"Unknown auxiliary task slot: {task!r}. Valid: {list(AUX_TASK_SLOTS)}"
-        )
     config_path = _get_config_path()
     with _cfg_lock:
         config_data = _load_yaml_config_file(config_path)
+        aux = config_data.get("auxiliary", {})
+        if not isinstance(aux, dict):
+            aux = {}
 
-        if task == "__reset__":
-            # Per-slot reset: set each slot to auto, preserving extra fields
-            # (timeout, extra_body, api_key, base_url, download_timeout, etc.)
-            aux_cfg = config_data.get("auxiliary", {})
-            if not isinstance(aux_cfg, dict):
-                aux_cfg = {}
-            for slot in AUX_TASK_SLOTS:
-                slot_cfg = aux_cfg.get(slot, {})
-                if not isinstance(slot_cfg, dict):
-                    slot_cfg = {}
-                slot_cfg["provider"] = "auto"
-                slot_cfg["model"] = ""
-                aux_cfg[slot] = slot_cfg
-            config_data["auxiliary"] = aux_cfg
-        else:
-            aux_cfg = config_data.get("auxiliary", {})
-            if not isinstance(aux_cfg, dict):
-                aux_cfg = {}
-            slot_cfg = aux_cfg.get(task, {})
-            if not isinstance(slot_cfg, dict):
-                slot_cfg = {}
-            slot_cfg["provider"] = provider or "auto"
-            slot_cfg["model"] = model or ""
-            if provider and (provider.startswith("custom:") or provider == "custom"):
-                try:
-                    _, _, resolved_base_url = resolve_model_provider(model)
-                    if resolved_base_url:
-                        slot_cfg["base_url"] = str(resolved_base_url).strip().rstrip("/")
-                except Exception:
-                    pass
-            aux_cfg[task] = slot_cfg
-            config_data["auxiliary"] = aux_cfg
+        for task_name in _AUXILIARY_TASK_NAMES:
+            task_cfg = aux.get(task_name, {})
+            if not isinstance(task_cfg, dict):
+                task_cfg = {}
+            task_cfg["provider"] = persisted_provider
+            task_cfg["model"] = persisted_model
+            aux[task_name] = task_cfg
 
+        config_data["auxiliary"] = aux
         _save_yaml_config_file(config_path, config_data)
-
     reload_config()
-    return {"ok": True, "task": task, "provider": provider, "model": model}
+    invalidate_models_cache()
+    return {"ok": True, "provider": persisted_provider, "model": persisted_model}
 
 
 # ── TTL cache for get_available_models() ─────────────────────────────────────

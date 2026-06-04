@@ -30,6 +30,7 @@ from api.agent_sessions import (
     is_cli_session_row,
     is_cli_session_row_visible,
     read_session_lineage_report,
+    read_session_lineage_metadata,
 )
 from api.compression_anchor import visible_messages_for_anchor
 from api.session_events import (
@@ -1060,6 +1061,8 @@ from api.config import (
     load_settings,
     save_settings,
     set_hermes_default_model,
+    get_auxiliary_model_config,
+    set_auxiliary_model_config,
     model_with_provider_context,
     get_reasoning_status,
     set_reasoning_display,
@@ -5269,6 +5272,19 @@ def handle_get(handler, parsed) -> bool:
                 raw["model"] = effective_model
             if effective_provider:
                 raw["model_provider"] = effective_provider
+            # Enrich single-session payload with lineage metadata so that
+            # the frontend's upsertActiveSessionForLocalTurn carries
+            # _lineage_root_id across compression boundaries.  Without this
+            # the optimistically-upserted row lacks the grouping key and
+            # causes duplicate sidebar entries after context compression.
+            try:
+                _lineage_meta = read_session_lineage_metadata(
+                    _active_state_db_path(), {sid}
+                )
+                if _lineage_meta.get(sid):
+                    raw.update(_lineage_meta[sid])
+            except Exception:
+                pass
             redact = redact_session_data(raw)
             _t5 = _time.monotonic()
             resp = j(handler, {"session": redact})
@@ -6183,10 +6199,11 @@ def handle_get(handler, parsed) -> bool:
                     handler.wfile.write(html_content)
                     return True
 
+    # ── Auxiliary (background) model ──
+    if parsed.path == "/api/auxiliary-model":
+        return j(handler, get_auxiliary_model_config())
+
     return False  # 404
-
-
-# ── GET route helpers
 
 
 def handle_post(handler, parsed) -> bool:
@@ -6418,24 +6435,17 @@ def handle_post(handler, parsed) -> bool:
         except RuntimeError as e:
             return bad(handler, str(e), 500)
 
-    # ── Auxiliary model set (POST) ──
-    if parsed.path == "/api/model/set":
-        scope = str(body.get("scope") or "").strip()
-        task = str(body.get("task") or "").strip()
-        provider = str(body.get("provider") or "auto").strip()
-        model = str(body.get("model") or "").strip()
-        if scope == "auxiliary":
-            from api.config import set_auxiliary_model
-            try:
-                return j(handler, set_auxiliary_model(task, provider, model))
-            except Exception as exc:
-                return bad(handler, str(exc), status=400)
-        if scope == "main":
-            try:
-                return j(handler, set_hermes_default_model(model))
-            except ValueError as exc:
-                return bad(handler, str(exc), status=400)
-        return bad(handler, f"unknown scope: {scope}", status=400)
+    # ── Auxiliary (background) model ──
+    if parsed.path == "/api/auxiliary-model":
+        try:
+            return j(handler, set_auxiliary_model_config(
+                body.get("provider", ""),
+                body.get("model", ""),
+            ))
+        except ValueError as e:
+            return bad(handler, str(e))
+        except RuntimeError as e:
+            return bad(handler, str(e), 500)
 
     # ── Providers (POST) ──
     if parsed.path == "/api/providers":
