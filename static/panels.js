@@ -3239,29 +3239,6 @@ function _renderInsights(d, box, wikiStatus) {
       </div>
     </div>`;
 
-  // Chat vs Background split
-  let splitHtml = '';
-  if (d.usage_split) {
-    const us = d.usage_split;
-    const chatT = us.chat.tokens || 0;
-    const bgT = us.background.tokens || 0;
-    const splitTotal = chatT + bgT || 1;
-    const chatPct = Math.round(chatT / splitTotal * 100);
-    const bgPct = 100 - chatPct;
-    splitHtml = `<div class="insights-card">
-      <div class="insights-card-title">${esc(t('insights_usage_split'))}</div>
-      <div style="margin-bottom:8px;font-size:11px;color:var(--muted)">${esc(t('insights_usage_split_desc').replace('{model}', us.auxiliary_model || '?'))}</div>
-      <div style="display:flex;gap:4px;height:18px;border-radius:4px;overflow:hidden;background:var(--border2)">
-        <div style="width:${chatPct}%;background:var(--accent);min-width:${chatPct?2:0}px" title="${esc(t('insights_chat_tokens'))}: ${fmtTokens(chatT)}"></div>
-        <div style="width:${bgPct}%;background:var(--muted);min-width:${bgPct?2:0}px" title="${esc(t('insights_bg_tokens'))}: ${fmtTokens(bgT)}"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px">
-        <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--accent);margin-right:4px"></i>${esc(t('insights_chat'))} ${fmtTokens(chatT)} <span style="color:var(--muted)">(${chatPct}%)</span></span>
-        <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--muted);margin-right:4px"></i>${esc(t('insights_background'))} ${fmtTokens(bgT)} <span style="color:var(--muted)">(${bgPct}%)</span></span>
-      </div>
-    </div>`;
-  }
-
   box.innerHTML = `
     ${_renderSystemHealthPanel()}
     ${_renderLlmWikiStatus(wikiStatus)}
@@ -3273,7 +3250,6 @@ function _renderInsights(d, box, wikiStatus) {
       ${tokenCards}
       ${modelsHtml}
     </div>
-    ${splitHtml}
     ${dowHtml}
     ${hodHtml}
     <div style="text-align:center;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">${esc(d.period_label ? d.period_label : t('insights_footer').replace('{days}', d.period_days))}</div>
