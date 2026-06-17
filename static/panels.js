@@ -6363,10 +6363,12 @@ async function loadSettingsPanel(){
         const _auxProvider=(auxCfg&&auxCfg.provider)||'';
         _settingsAuxiliaryModelOnOpen=_auxModel;
         if(_auxModel){
-          // Dropdown uses @provider:model format for non-default providers
+          // Dropdown uses @provider:model format for non-default providers.
+          // Pass auxProvider as preferredProviderId (not active_provider) so
+          // the cross-provider guard doesn't reject the match.
           const candidate=_auxProvider?'@'+_auxProvider+':'+_auxModel:_auxModel;
           if(typeof _applyModelToDropdown==='function'){
-            _applyModelToDropdown(candidate, auxModelSel, (models&&models.active_provider)||window._activeProvider||null);
+            _applyModelToDropdown(candidate, auxModelSel, _auxProvider||null);
           }else{
             auxModelSel.value=candidate;
           }
