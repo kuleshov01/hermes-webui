@@ -6359,12 +6359,16 @@ async function loadSettingsPanel(){
       // Load current auxiliary model config
       try{
         const auxCfg=await api('/api/auxiliary-model');
-        _settingsAuxiliaryModelOnOpen=(auxCfg&&auxCfg.model)||'';
-        if(_settingsAuxiliaryModelOnOpen){
+        const _auxModel=(auxCfg&&auxCfg.model)||'';
+        const _auxProvider=(auxCfg&&auxCfg.provider)||'';
+        _settingsAuxiliaryModelOnOpen=_auxModel;
+        if(_auxModel){
+          // Dropdown uses @provider:model format for non-default providers
+          const candidate=_auxProvider?'@'+_auxProvider+':'+_auxModel:_auxModel;
           if(typeof _applyModelToDropdown==='function'){
-            _applyModelToDropdown(_settingsAuxiliaryModelOnOpen, auxModelSel, (models&&models.active_provider)||window._activeProvider||null);
+            _applyModelToDropdown(candidate, auxModelSel, (models&&models.active_provider)||window._activeProvider||null);
           }else{
-            auxModelSel.value=_settingsAuxiliaryModelOnOpen;
+            auxModelSel.value=candidate;
           }
         }
       }catch(_e){}
@@ -8699,8 +8703,10 @@ function _renderFallbackModelsList(providers){
     item.className='fallback-model-item';
     item.dataset.model=entry.model||'';
     item.dataset.provider=entry.provider||'';
-    const providerChip=entry.provider
-      ? `<span class="model-badge">${esc(entry.provider)}</span>`
+    // Build display: use @provider:model if provider is non-default for label resolution
+    const dispProvider=entry.provider||'';
+    const providerChip=dispProvider
+      ? `<span class="model-badge">${esc(dispProvider)}</span>`
       : '';
     item.innerHTML=`<span class="model-name">${esc(entry.model)}</span>${providerChip}`
       +`<span class="fallback-idx">#${i+1}</span>`
