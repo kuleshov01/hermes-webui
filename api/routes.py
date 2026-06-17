@@ -1063,6 +1063,8 @@ from api.config import (
     set_hermes_default_model,
     get_auxiliary_model_config,
     set_auxiliary_model_config,
+    get_fallback_providers,
+    set_fallback_providers,
     model_with_provider_context,
     get_reasoning_status,
     set_reasoning_display,
@@ -6203,6 +6205,10 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/auxiliary-model":
         return j(handler, get_auxiliary_model_config())
 
+    # ── Fallback providers chain ──
+    if parsed.path == "/api/fallback-providers":
+        return j(handler, {"providers": get_fallback_providers()})
+
     return False  # 404
 
 
@@ -6442,6 +6448,16 @@ def handle_post(handler, parsed) -> bool:
                 body.get("provider", ""),
                 body.get("model", ""),
             ))
+        except ValueError as e:
+            return bad(handler, str(e))
+        except RuntimeError as e:
+            return bad(handler, str(e), 500)
+
+    # ── Fallback providers chain ──
+    if parsed.path == "/api/fallback-providers":
+        try:
+            providers = body.get("providers", [])
+            return j(handler, set_fallback_providers(providers))
         except ValueError as e:
             return bad(handler, str(e))
         except RuntimeError as e:

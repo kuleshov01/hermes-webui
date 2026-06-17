@@ -2644,6 +2644,66 @@ def set_auxiliary_model_config(provider: str, model: str) -> dict:
     return {"ok": True, "provider": persisted_provider, "model": persisted_model}
 
 
+# ── Fallback providers ──────────────────────────────────────────────────
+
+
+def get_fallback_providers() -> list[dict]:
+    """Read the current ``fallback_providers`` list from ``config.yaml``.
+
+    Returns a list of ``{provider, model}`` dicts.  Returns an empty list
+    when the key is missing or not a list.
+    """
+    config_data = _load_yaml_config_file(_get_config_path())
+    raw = config_data.get("fallback_providers", [])
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        provider = str(entry.get("provider", "")).strip()
+        model = str(entry.get("model", "")).strip()
+        if model:
+            result.append({"provider": provider, "model": model})
+    return result
+
+
+def set_fallback_providers(providers: list[dict]) -> dict:
+    """Write the ordered fallback chain into ``config.yaml``.
+
+    *providers* is a list of ``{provider, model}`` dicts.  Each entry is
+    resolved the same way as :func:`set_auxiliary_model_config` so that
+    ``@provider:model`` notation is handled transparently.
+    """
+    if not isinstance(providers, list):
+        raise ValueError("providers must be a list")
+
+    cleaned = []
+    for entry in providers:
+        if not isinstance(entry, dict):
+            continue
+        raw_model = str(entry.get("model", "")).strip()
+        raw_provider = str(entry.get("provider", "")).strip()
+        if not raw_model:
+            continue
+        resolved_model, resolved_provider, _ = resolve_model_provider(raw_model)
+        provider = str(resolved_provider or raw_provider or "").strip()
+        model = str(resolved_model or raw_model).strip()
+        if provider.lower() == "local":
+            provider = "custom"
+        cleaned.append({"provider": provider, "model": model})
+
+    config_path = _get_config_path()
+    with _cfg_lock:
+        config_data = _load_yaml_config_file(config_path)
+        config_data["fallback_providers"] = cleaned
+        _save_yaml_config_file(config_path, config_data)
+    # Reload outside the lock — reload_config() acquires _cfg_lock itself.
+    reload_config()
+    invalidate_models_cache()
+    return {"ok": True, "providers": cleaned}
+
+
 # ── TTL cache for get_available_models() ─────────────────────────────────────
 _available_models_cache: dict | None = None
 _available_models_cache_ts: float = 0.0

@@ -211,6 +211,22 @@ def _board_payload(parsed):
                 "name": "archived",
                 "tasks": [row(task) for task in tasks if task.status == "archived"],
             })
+        # Collect flat task dicts from all columns for enrichment
+        all_tasks = [t for col in columns for t in col["tasks"]]
+
+        # Enrich tasks with orchestrator/helper flags
+        decomposed_roots = set()
+        if all_tasks:
+            ids_param = ",".join("?" for _ in all_tasks)
+            rows = conn.execute(
+                f"SELECT DISTINCT task_id FROM task_events WHERE kind='decomposed' AND task_id IN ({ids_param})",
+                [t['id'] for t in all_tasks]
+            ).fetchall()
+            decomposed_roots = {r[0] for r in rows}
+        for t in all_tasks:
+            t['is_orchestrator'] = t['id'] in decomposed_roots
+            t['is_helper'] = (t.get('title') or '').lower().startswith('helper:')
+
         return {
             "columns": columns,
             "tenants": sorted({task.tenant for task in tasks if getattr(task, "tenant", None)}),
@@ -466,11 +482,56 @@ def _link_tasks_payload(body: dict, *, unlink: bool = False, board=None):
         kb.link_tasks(conn, parent_id, child_id)
         return {"ok": True, "parent_id": parent_id, "child_id": child_id, "read_only": False}
 
+def _tree_payload(parsed):
+    """GET /api/kanban/tree — return all tasks and links for the active board,
+    used by the client-side Task Tree view to build the full recursive
+    dependency tree."""
+    board = _resolve_board(parsed)
+    include_archived = _bool_query(parsed, "include_archived", False)
+    kb = _kb()
+    with _conn(board=board) as conn:
+        tasks = kb.list_tasks(conn, include_archived=include_archived)
+        # Build a map of task_id -> task summary
+        task_map = {}
+        for task in tasks:
+            task_map[task.id] = {
+                "id": task.id,
+                "title": getattr(task, "title", task.id),
+                "status": getattr(task, "status", "todo"),
+                "assignee": getattr(task, "assignee", None),
+            }
+        # Get all links
+        links = []
+        try:
+            rows = conn.execute("SELECT parent_id, child_id FROM task_links").fetchall()
+            for row in rows:
+                links.append({"parent_id": row["parent_id"], "child_id": row["child_id"]})
+        except Exception:
+            links = []
+        return {
+            "tasks": task_map,
+            "links": links,
+            "read_only": False,
+        }
+
+
 def _links_for(conn, task_id: str) -> dict:
     kb = _kb()
+    def _enrich(ids):
+        out = []
+        for tid in ids:
+            try:
+                t = kb.get_task(conn, tid)
+                if t:
+                    out.append({"id": tid, "title": getattr(t, "title", tid), "status": getattr(t, "status", "unknown")})
+                else:
+                    out.append({"id": tid, "title": tid, "status": "unknown"})
+            except Exception:
+                out.append({"id": tid, "title": tid, "status": "unknown"})
+        return out
     return {
-        "parents": kb.parent_ids(conn, task_id),
-        "children": kb.child_ids(conn, task_id),
+        "parents": _enrich(kb.parent_ids(conn, task_id)),
+        "children": _enrich(kb.child_ids(conn, task_id)),
     }
 
 
@@ -1101,6 +1162,8 @@ def handle_kanban_get(handler, parsed) -> bool | None:
             return j(handler, _stats_payload(board=_resolve_board(parsed))) or True
         if path == "/api/kanban/assignees":
             return j(handler, _assignees_payload(board=_resolve_board(parsed))) or True
+        if path == "/api/kanban/tree":
+            return j(handler, _tree_payload(parsed)) or True
         if path == "/api/kanban/events":
             return j(handler, _events_payload(parsed)) or True
         if path == "/api/kanban/events/stream":
@@ -1133,6 +1196,10 @@ def handle_kanban_get(handler, parsed) -> bool | None:
         return bad(handler, str(exc))
     except RuntimeError as exc:
         return bad(handler, str(exc), status=409)
+    except Exception as exc:
+        import traceback as _tb
+        _tb.print_exc()
+        return bad(handler, f"internal error: {exc}", status=500)
 
 
 def handle_kanban_post(handler, parsed, body) -> bool | None:

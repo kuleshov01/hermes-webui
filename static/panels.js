@@ -1648,11 +1648,14 @@ function _kanbanCard(task, status){
   const stale = _kanbanCardStalenessClass(task);
   const body = _kanbanTaskBody(task);
   const assignee = task.assignee ? `<span class="kanban-card-assignee">@${esc(task.assignee)}</span>` : `<span class="kanban-card-unassigned">${esc(t('kanban_unassigned'))}</span>`;
-  return `<article class="kanban-card ${esc(stale)}" data-kanban-task-id="${esc(task.id)}" draggable="true" ondragstart="dragKanbanTask(event, '${esc(task.id)}')" ondragend="finishKanbanDrag(event)" onclick="return openKanbanCard(event, '${esc(task.id)}')" tabindex="0" role="button" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadKanbanTask('${esc(task.id)}')}">
-    <div class="kanban-card-topline"><span class="kanban-card-id">${esc(task.id || '')}</span>${priority ? `<span class="kanban-badge priority">P${priority}</span>` : ''}${task.tenant ? `<span class="kanban-badge tenant">${esc(task.tenant)}</span>` : ''}</div>
+  const orchBadge = task.is_orchestrator ? '<span class="kanban-badge kanban-badge-orch">⚙️ Orchestrator</span>' : '';
+  const helperBadge = task.is_helper ? '<span class="kanban-badge kanban-badge-helper">🔧 Helper</span>' : '';
+  const runningIndicator = (task.status === 'running' && task.claimed_at) ? `<span class="kanban-running-indicator" data-start="${esc(task.claimed_at)}"></span>` : '';
+  return `<article class="kanban-card ${esc(stale)}" data-status="${esc(task.status || '')}" data-kanban-task-id="${esc(task.id)}" draggable="true" ondragstart="dragKanbanTask(event, '${esc(task.id)}')" ondragend="finishKanbanDrag(event)" onclick="return openKanbanCard(event, '${esc(task.id)}')" tabindex="0" role="button" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadKanbanTask('${esc(task.id)}')}">
+    <div class="kanban-card-topline"><span class="kanban-card-id">${esc(task.id || '')}</span>${priority ? `<span class="kanban-badge priority">P${priority}</span>` : ''}${task.tenant ? `<span class="kanban-badge tenant">${esc(task.tenant)}</span>` : ''}${orchBadge}${helperBadge}</div>
     <div class="kanban-card-title">${esc(_kanbanTaskTitle(task))}</div>
     ${body ? `<div class="kanban-card-body">${_kanbanRenderMarkdown(body)}</div>` : ''}
-    <div class="kanban-card-meta">${assignee}${comments ? `<span class="kanban-card-metric">💬 ${comments}</span>` : ''}${linkTotal ? `<span class="kanban-card-metric">↔ ${linkTotal}</span>` : ''}${age ? `<span class="kanban-card-age">${esc(age)}</span>` : ''}</div>
+    <div class="kanban-card-meta">${assignee}${comments ? `<span class="kanban-card-metric">💬 ${comments}</span>` : ''}${linkTotal ? `<span class="kanban-card-metric">↔ ${linkTotal}</span>` : ''}${age ? `<span class="kanban-card-age">${esc(age)}</span>` : ''}${runningIndicator}</div>
     ${_kanbanCardQuickActions(task)}
   </article>`;
 }
@@ -1743,6 +1746,32 @@ async function loadKanban(animate){
     if (board) board.innerHTML = html;
     if (list) list.innerHTML = html;
   }
+  // Running timer tick — update elapsed indicators every second
+  if (!window._kanbanTimerInterval) {
+    window._kanbanTimerInterval = setInterval(() => {
+      document.querySelectorAll('.kanban-running-indicator').forEach(el => {
+        const start = el.dataset.start;
+        if (!start) return;
+        const sec = Math.floor(Date.now() / 1000 - new Date(start).getTime() / 1000);
+        if (sec < 60) el.textContent = sec + 's';
+        else if (sec < 3600) el.textContent = Math.floor(sec / 60) + 'm';
+        else el.textContent = Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm';
+      });
+    }, 1000);
+  }
+  _renderAgentSidebar();
+}
+
+function _elapsedTime(isoStr) {
+  const sec = Math.floor(Date.now() / 1000 - new Date(isoStr).getTime() / 1000);
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm';
+  return Math.floor(sec / 3600) + 'h' + Math.floor((sec % 3600) / 60) + 'm';
+}
+function _elapsedSince(isoStr) {
+  const sec = Math.floor(Date.now() / 1000 - new Date(isoStr).getTime() / 1000);
+  if (sec < 60) return 'just now';
+  return _elapsedTime(isoStr) + ' ago';
 }
 
 function filterKanban(){ _kanbanRenderBoard(); }
@@ -2000,6 +2029,7 @@ async function unblockKanbanTask(taskId){
 }
 
 function closeKanbanTaskDetail(){
+  _kanbanLogPoll(null, null);
   _kanbanCurrentTaskId = null;
   const preview = $('kanbanTaskPreview');
   if (preview) {
@@ -2091,12 +2121,36 @@ function _kanbanLinksHtml(links){
   const parents = (links && links.parents) || [];
   const children = (links && links.children) || [];
   if (!parents.length && !children.length) return '';
-  const item = id => `<code>${esc(id)}</code>`;
+  const statusIcon = s => {
+    if (s === 'done') return '✓';
+    if (s === 'running') return '●';
+    if (s === 'blocked') return '⊘';
+    if (s === 'ready') return '▶';
+    if (s === 'triage') return '?';
+    return s || '';
+  };
+  const item = obj => {
+    const id = obj && obj.id || obj;
+    const title = obj && obj.title || id;
+    const status = obj && obj.status || '';
+    const icon = statusIcon(status);
+    const label = icon ? `${icon} ${esc(title)}` : esc(title);
+    return `<a href="#" class="kanban-link-chip" data-task-id="${esc(id)}" title="${esc(id)}">${label}</a>`;
+  };
   return `<div class="kanban-detail-links-grid">
     <div><strong>${esc(t('kanban_parents'))}</strong><div>${parents.length ? parents.map(item).join(' ') : esc(t('kanban_empty'))}</div></div>
     <div><strong>${esc(t('kanban_children'))}</strong><div>${children.length ? children.map(item).join(' ') : esc(t('kanban_empty'))}</div></div>
   </div>`;
 }
+
+// Delegate clicks on kanban link chips to navigate to the linked task.
+document.addEventListener('click', function(e) {
+  const chip = e.target.closest('.kanban-link-chip');
+  if (!chip) return;
+  e.preventDefault();
+  const taskId = chip.dataset.taskId;
+  if (taskId) loadKanbanTask(taskId);
+});
 
 async function createKanbanTask(){
   const input = document.getElementById('kanbanNewTaskTitle');
@@ -2613,7 +2667,7 @@ function _kanbanRenderTaskDetail(data){
     </div>
     <div class="kanban-task-preview-body">${_kanbanRenderMarkdown(body)}</div>
     ${meta.length ? `<div class="kanban-meta">${esc(meta.join(' · '))}</div>` : ''}
-    <div class="kanban-status-actions">${statusButtons}</div>
+    <div class="kanban-status-actions">${statusButtons}<button class="btn secondary" onclick="showTaskTree('${esc(task.id)}')" style="font-size:12px;padding:4px 10px;margin-left:4px" title="${esc(t('kanban_task_tree'))}">🌳</button></div>
     <div class="kanban-detail-grid">
       ${_kanbanDetailSection('kanban-detail-comments', String(t('kanban_comments_count')).replace('{0}', comments.length), comments.map(_kanbanCommentHtml).join(''), 'kanban_no_comments')}
       ${_kanbanDetailSection('kanban-detail-events', String(t('kanban_events_count')).replace('{0}', events.length), events.map(_kanbanEventHtml).join(''), 'kanban_no_events')}
@@ -2625,6 +2679,30 @@ function _kanbanRenderTaskDetail(data){
       <textarea id="kanbanCommentInput" rows="2" placeholder="${esc(t('kanban_add_comment'))}"></textarea>
       <button class="btn primary" onclick="addKanbanComment('${esc(task.id)}')">${esc(t('kanban_add_comment'))}</button>
     </div>`;
+}
+
+/* ─── Live-log auto-refresh for running tasks ─── */
+let _kanbanLogPollId = null;
+let _kanbanLogPollTaskId = null;
+
+function _kanbanLogPoll(taskId, status) {
+  // Clear any existing poll
+  if (_kanbanLogPollId) { clearInterval(_kanbanLogPollId); _kanbanLogPollId = null; _kanbanLogPollTaskId = null; }
+  // Only poll for running tasks
+  if (status !== 'running' || !taskId) return;
+  _kanbanLogPollTaskId = taskId;
+  _kanbanLogPollId = setInterval(async () => {
+    if (_kanbanLogPollTaskId !== taskId) { clearInterval(_kanbanLogPollId); return; }
+    try {
+      const log = await api('/api/kanban/tasks/' + encodeURIComponent(taskId) + '/log' + _kanbanBoardQuery({tail: 65536}));
+      const pre = document.querySelector('.kanban-detail-pre');
+      if (pre && log && log.content) {
+        pre.textContent = log.content;
+        // Auto-scroll to bottom
+        pre.scrollTop = pre.scrollHeight;
+      }
+    } catch(e) { /* silent */ }
+  }, 2000);
 }
 
 async function loadKanbanTask(taskId){
@@ -2645,6 +2723,8 @@ async function loadKanbanTask(taskId){
       preview.style.display = '';
       preview.innerHTML = _kanbanRenderTaskDetail(data);
     }
+    // Auto-refresh log for running tasks
+    _kanbanLogPoll(taskId, task.status);
     showToast(`${t('kanban_task')}: ${title}`);
   } catch(e) { showToast(t('kanban_unavailable') + ': ' + (e.message || e), 'error'); }
 }
@@ -5676,6 +5756,7 @@ let _settingsSkinOnOpen = null; // track skin at open time for discard revert
 let _settingsFontSizeOnOpen = null; // track font size at open time for discard revert
 let _settingsHermesDefaultModelOnOpen = '';
 let _settingsAuxiliaryModelOnOpen = '';
+let _settingsFallbackOnOpen = []; // [{provider, model}, ...]
 let _settingsSection = 'conversation';
 let _currentSettingsSection = 'conversation';
 let _settingsAppearanceAutosaveTimer = null;
@@ -6104,7 +6185,8 @@ async function _autosavePreferencesSettings(payload){
     const modelDirty=!!(modelSel&&((modelSel.value||'')!==(_settingsHermesDefaultModelOnOpen||'')));
     const auxModelSel=$('settingsAuxiliaryModel');
     const auxModelDirty=!!(auxModelSel&&((auxModelSel.value||'')!==(_settingsAuxiliaryModelOnOpen||'')));
-    if(!pwDirty&&!modelDirty&&!auxModelDirty){
+    const fallbackDirty=_readCurrentFallbackList().some((e,i)=>{const o=_settingsFallbackOnOpen[i]||{};return e.model!==o.model||e.provider!==o.provider;})||_readCurrentFallbackList().length!==_settingsFallbackOnOpen.length;
+    if(!pwDirty&&!modelDirty&&!auxModelDirty&&!fallbackDirty){
       _settingsDirty=false;
       const bar=$('settingsUnsavedBar');
       if(bar) bar.style.display='none';
@@ -6288,6 +6370,16 @@ async function loadSettingsPanel(){
       }catch(_e){}
       auxModelSel.addEventListener('change',_markSettingsDirty,{once:false});
     }
+    // ── Fallback models ──
+    (async()=>{
+      try{
+        const fbCfg=await api('/api/fallback-providers');
+        const providers=(fbCfg&&fbCfg.providers)||[];
+        _settingsFallbackOnOpen=JSON.parse(JSON.stringify(providers));
+        _renderFallbackModelsList(providers);
+        _populateFallbackModelsDropdown();
+      }catch(_e){}
+    })();
     // Send key preference
     const sendKeySel=$('settingsSendKey');
     if(sendKeySel){sendKeySel.value=settings.send_key||'enter';sendKeySel.addEventListener('change',_schedulePreferencesAutosave,{once:false});}
@@ -7785,6 +7877,8 @@ async function saveSettings(andClose){
           if(typeof showToast==='function') showToast('Failed to update auxiliary model — settings saved');
         }
       }
+      // Fallback models chain
+      await _saveFallbackIfNeeded();
       _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showQuotaChip,showTps,fadeTextEffect,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
       showToast(t(saved.auth_just_enabled?'settings_saved_pw':'settings_saved_pw_updated'));
       _settingsDirty=false;
@@ -7813,6 +7907,8 @@ async function saveSettings(andClose){
         if(typeof showToast==='function') showToast('Failed to update auxiliary model — settings saved');
       }
     }
+    // Fallback models chain
+    await _saveFallbackIfNeeded();
     _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showQuotaChip,showTps,fadeTextEffect,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
     showToast(t('settings_saved'));
     _settingsDirty=false;
@@ -8301,5 +8397,350 @@ async function _restoreCheckpoint(workspace,checkpoint,message){
     }
   }catch(e){
     showToast(t('checkpoint_restore')+': '+e.message,'error');
+  }
+}
+
+/* ── Agent sidebar ── */
+let _agentSidebarOpen = false;
+
+function toggleAgentSidebar() {
+  _agentSidebarOpen = !_agentSidebarOpen;
+  $('kanbanAgentSidebar').hidden = !_agentSidebarOpen;
+  $('kanbanAgentChevron').classList.toggle('open', _agentSidebarOpen);
+  if (_agentSidebarOpen) _renderAgentSidebar();
+}
+
+function _renderAgentSidebar() {
+  if (!_kanbanBoard || !_kanbanBoard.columns) return;
+  const allTasks = _kanbanBoard.columns.flatMap(c => c.tasks || []);
+  const active = allTasks
+    .filter(t => t.status !== 'archived')
+    .sort((a, b) => {
+      const order = {running:0,blocked:1,ready:2,triage:3,todo:4,done:5};
+      return (order[a.status] || 9) - (order[b.status] || 9);
+    });
+  const countEl = $('kanbanAgentCount');
+  if (countEl) countEl.textContent = active.length;
+  if (!_agentSidebarOpen) return;
+  const sidebar = $('kanbanAgentSidebar');
+  if (!sidebar) return;
+  sidebar.innerHTML = active.map(tk => {
+    const s = tk.status || 'todo';
+    const isOrch = tk.is_orchestrator;
+    const isHelper = tk.is_helper;
+    const dotCls = isOrch ? 'orchestrator' : s;
+    const time = tk.claimed_at ? _elapsedTime(tk.claimed_at) : (tk.completed_at ? _elapsedSince(tk.completed_at) : '');
+    return `<div class="agent-sidebar-item" onclick="loadKanbanTask('${esc(tk.id)}')">
+      <span class="agent-dot ${dotCls}"></span>
+      <div class="agent-sidebar-info">
+        <div class="agent-sidebar-title">${isOrch ? '⚙️ ' : isHelper ? '🔧 ' : ''}${esc(tk.title || tk.id)}</div>
+        <div class="agent-sidebar-meta">
+          ${tk.assignee ? `<span>@${esc(tk.assignee)}</span>` : ''}
+          ${time ? `<span>· ${esc(time)}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ─── Task Tree / DAG Modal ─── */
+async function showTaskTree(taskId){
+  const modal = document.getElementById('kanbanTreeModal');
+  if(!modal) return;
+  // '__all__' = show full board, any other id = show subtree
+  if(taskId === '__all__') taskId = null;
+  const body = modal.querySelector('.kanban-modal');
+  body.classList.add('kt-wide');
+  body.innerHTML = '<div style="padding:16px;color:var(--muted)">Loading…</div>';
+  modal.hidden = false;
+  modal.querySelector('.kanban-modal-overlay-bg').addEventListener('click', ()=>{ body.classList.remove('kt-wide'); modal.hidden=true; }, {once:true});
+
+  try {
+    const data = await api('/api/kanban/tree');
+    if(!data || !data.tasks || !data.links){ body.innerHTML='<div style="padding:16px;color:var(--error)">Failed to load tree data</div>'; return; }
+
+    // Filter out archived tasks and links
+    const tasks = Object.fromEntries(Object.entries(data.tasks).filter(([id,t])=>t.status!=='archived'));
+    const allIds = Object.keys(tasks);
+    const activeLinks = data.links.filter(l=>tasks[l.parent_id]&&tasks[l.child_id]);
+
+    const childrenOf = {};
+    const parentOf = {};
+    for(const lnk of activeLinks){
+      if(!childrenOf[lnk.parent_id]) childrenOf[lnk.parent_id] = [];
+      if(!(lnk.child_id in parentOf)) parentOf[lnk.child_id] = lnk.parent_id;
+      if(!childrenOf[lnk.parent_id].includes(lnk.child_id)) childrenOf[lnk.parent_id].push(lnk.child_id);
+    }
+
+    // Subtree filter: if taskId is a root, show only its descendants
+    let subtreeIds = null; // null = show all
+    if(taskId && !parentOf[taskId]){
+      subtreeIds = new Set();
+      const bfs = [taskId];
+      while(bfs.length){
+        const cur = bfs.shift();
+        if(subtreeIds.has(cur)) continue;
+        subtreeIds.add(cur);
+        for(const kid of (childrenOf[cur]||[])) bfs.push(kid);
+      }
+    }
+
+    const filteredIds = subtreeIds ? allIds.filter(id=>subtreeIds.has(id)) : allIds;
+    const filteredLinks = subtreeIds
+      ? activeLinks.filter(l=>subtreeIds.has(l.parent_id)&&subtreeIds.has(l.child_id))
+      : activeLinks;
+
+    // Rebuild maps from filtered set
+    const fChildrenOf = {};
+    const fParentOf = {};
+    for(const lnk of filteredLinks){
+      if(!fChildrenOf[lnk.parent_id]) fChildrenOf[lnk.parent_id] = [];
+      if(!(lnk.child_id in fParentOf)) fParentOf[lnk.child_id] = lnk.parent_id;
+      if(!fChildrenOf[lnk.parent_id].includes(lnk.child_id)) fChildrenOf[lnk.parent_id].push(lnk.child_id);
+    }
+
+    // Collect root tasks (no parent) within filtered set
+    const roots = filteredIds.filter(id => !fParentOf[id]);
+
+    // Assign depth (generation) to each task via BFS
+    // Use MAX depth so tasks reachable via multiple paths get the deepest level
+    // (e.g. reviewer linked from root at depth=1 AND from tester at depth=2 → depth=2)
+    const depthOf = {};
+    const treeParentOf = {}; // Only the parent that gave max depth (for tree edges)
+    const queue = [];
+    for (const r of roots) { depthOf[r] = 0; queue.push(r); }
+    while (queue.length) {
+      const cur = queue.shift();
+      const curDepth = depthOf[cur];
+      for (const kid of (fChildrenOf[cur] || [])) {
+        const newDepth = curDepth + 1;
+        if (!(kid in depthOf) || depthOf[kid] < newDepth) {
+          depthOf[kid] = newDepth;
+          treeParentOf[kid] = cur; // This parent gave the deepest path
+          queue.push(kid);
+        }
+      }
+    }
+
+    // Build tree-edge children map (only the parent that gave max depth)
+    const treeChildrenOf = {};
+    for (const [kid, parent] of Object.entries(treeParentOf)) {
+      treeChildrenOf[parent] = treeChildrenOf[parent] || [];
+      treeChildrenOf[parent].push(kid);
+    }
+
+    // Group by depth (columns)
+    const maxDepth = Math.max(0, ...Object.values(depthOf));
+    const columns = [];
+    for (let d = 0; d <= maxDepth; d++) columns.push([]);
+
+    for (const id of filteredIds) {
+      const d = depthOf[id] || 0;
+      columns[d].push(id);
+    }
+
+    const statusLabel = (s)=>({done:'done',archived:'archived',running:'running',ready:'ready',blocked:'blocked',triage:'triage',todo:'todo'}[s]||s);
+    const statusClass = (s)=>({done:'kt-done',archived:'kt-archived',running:'kt-running',ready:'kt-ready',blocked:'kt-blocked',triage:'kt-triage'}[s]||'kt-todo');
+
+    function renderCard(id) {
+      const tk = tasks[id] || {id, title: id, status:'todo', assignee:null};
+      const cls = statusClass(tk.status);
+      const label = statusLabel(tk.status);
+      const shortId = tk.id.replace(/^t_/,'');
+      const title = tk.title || tk.id;
+      const hl = id===taskId ? ' kt-hl' : '';
+      return `<div class="kt-dag-node${hl} ${cls}"><div class="kt-content" data-tid="${esc(tk.id)}" title="${esc(title)}">`
+        + `<span class="kt-badge ${cls}">${esc(label)}</span>`
+        + `<div class="kt-info"><span class="kt-id">${esc(shortId)}</span><span class="kt-title">${esc(title)}</span>`
+        + (tk.assignee ? `<span class="kt-assignee">@${esc(tk.assignee)}</span>` : '')
+        + `</div></div></div>`;
+    }
+
+    // Build columns HTML
+    let colsHtml = columns.map((col, d) => {
+      return `<div class="kt-dag-column" data-gen="${d}">`
+        + col.map(renderCard).join('')
+        + '</div>';
+    }).join('');
+
+    const showAllBtn = subtreeIds
+      ? `<button class="btn secondary" style="font-size:11px;padding:2px 8px;margin-left:6px" onclick="showTaskTree('__all__')">Show all</button>`
+      : '';
+
+    body.innerHTML = `
+      <div class="kt-head"><h3>🌳 Board Tree</h3><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--muted)">${esc(filteredIds.length)} tasks · ${esc(roots.length)} root${roots.length!==1?'s':''} · ${esc(filteredLinks.length)} links</span>${showAllBtn}<button class="kt-close" onclick="document.getElementById('kanbanTreeModal').hidden=true;this.closest('.kanban-modal').classList.remove('kt-wide')">&times;</button></div></div>
+      <div class="kt-dag-wrap" id="ktDagWrap"><button class="kt-dag-scroll left" onclick="document.getElementById('ktDagBody').scrollBy({left:-300,behavior:'smooth'})">‹</button><div class="kt-body kt-body-dag" id="ktDagBody"><div class="kt-dag-root" id="ktDagRoot">${colsHtml}<svg class="kt-svg" id="ktSvg"></svg></div></div><button class="kt-dag-scroll right" onclick="document.getElementById('ktDagBody').scrollBy({left:300,behavior:'smooth'})">›</button></div>
+      <div class="kt-foot">${esc(t('kanban_task_tree_hint')||'Click a task to navigate · Highlighted = current')}</div>`;
+
+    body.querySelectorAll('.kt-content').forEach(el=>{
+      el.addEventListener('click', ()=>{ body.classList.remove('kt-wide'); modal.hidden=true; loadKanbanTask(el.dataset.tid); });
+    });
+
+    // Draw SVG connector lines from each parent to its children
+    requestAnimationFrame(()=>{
+      const root = document.getElementById('ktDagRoot');
+      const svg = document.getElementById('ktSvg');
+      if (!root || !svg) return;
+
+      // Force layout reflow so scrollWidth accounts for all columns
+      const fullW = root.scrollWidth;
+      const fullH = root.scrollHeight;
+      svg.setAttribute('viewBox', `0 0 ${fullW} ${fullH}`);
+      svg.style.width = fullW + 'px';
+      svg.style.height = fullH + 'px';
+      svg.style.minWidth = fullW + 'px';
+      svg.style.minHeight = fullH + 'px';
+
+      const rootRect = root.getBoundingClientRect();
+      let paths = '';
+      for (const parentId of Object.keys(treeChildrenOf)) {
+        const parentEl = root.querySelector(`.kt-dag-node .kt-content[data-tid="${parentId}"]`);
+        if (!parentEl) continue;
+        for (const childId of treeChildrenOf[parentId]) {
+          const childEl = root.querySelector(`.kt-dag-node .kt-content[data-tid="${childId}"]`);
+          if (!childEl) continue;
+          const pr = parentEl.getBoundingClientRect();
+          const cr = childEl.getBoundingClientRect();
+          const x1 = pr.right - rootRect.left;
+          const y1 = pr.top + pr.height / 2 - rootRect.top;
+          const x2 = cr.left - rootRect.left;
+          const y2 = cr.top + cr.height / 2 - rootRect.top;
+          const mx = (x1 + x2) / 2;
+          paths += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="rgba(128,128,128,.4)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+        }
+      }
+      svg.innerHTML = paths;
+    });
+
+  } catch(e){
+    body.classList.remove('kt-wide');
+    body.innerHTML = `<div style="padding:16px;color:var(--error)">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ── Fallback Models UI helpers ──
+
+function _readCurrentFallbackList(){
+  const container=$('fallbackModelsContainer');
+  if(!container) return [];
+  const items=container.querySelectorAll('.fallback-model-item');
+  const result=[];
+  items.forEach(el=>{
+    result.push({model:el.dataset.model||'',provider:el.dataset.provider||''});
+  });
+  return result;
+}
+
+function _renderFallbackModelsList(providers){
+  const container=$('fallbackModelsContainer');
+  if(!container) return;
+  container.innerHTML='';
+  if(!providers||!providers.length){
+    container.innerHTML='<div style="color:var(--muted);font-size:11px;padding:4px 0">No fallback models configured</div>';
+    return;
+  }
+  providers.forEach((entry,i)=>{
+    const item=document.createElement('div');
+    item.className='fallback-model-item';
+    item.dataset.model=entry.model||'';
+    item.dataset.provider=entry.provider||'';
+    const providerChip=entry.provider
+      ? `<span class="model-badge">${esc(entry.provider)}</span>`
+      : '';
+    item.innerHTML=`<span class="model-name">${esc(entry.model)}</span>${providerChip}`
+      +`<span class="fallback-idx">#${i+1}</span>`
+      +`<button class="fallback-btn fallback-up-btn" title="Move up" data-idx="${i}">▲</button>`
+      +`<button class="fallback-btn fallback-down-btn" title="Move down" data-idx="${i}">▼</button>`
+      +`<button class="fallback-btn fallback-remove-btn" title="Remove" data-idx="${i}">✕</button>`;
+    container.appendChild(item);
+  });
+  // Wire events
+  container.querySelectorAll('.fallback-up-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>_moveFallbackItem(parseInt(btn.dataset.idx),-1));
+  });
+  container.querySelectorAll('.fallback-down-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>_moveFallbackItem(parseInt(btn.dataset.idx),1));
+  });
+  container.querySelectorAll('.fallback-remove-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>_removeFallbackItem(parseInt(btn.dataset.idx)));
+  });
+}
+
+function _moveFallbackItem(idx,direction){
+  const providers=_readCurrentFallbackList();
+  const newIdx=idx+direction;
+  if(newIdx<0||newIdx>=providers.length) return;
+  const tmp=providers[idx];
+  providers[idx]=providers[newIdx];
+  providers[newIdx]=tmp;
+  _renderFallbackModelsList(providers);
+  _markSettingsDirty();
+}
+
+function _removeFallbackItem(idx){
+  const providers=_readCurrentFallbackList();
+  providers.splice(idx,1);
+  _renderFallbackModelsList(providers);
+  _markSettingsDirty();
+}
+
+function _populateFallbackModelsDropdown(){
+  const sel=$('settingsModel');
+  const addSel=$('fallbackModelAddSelect');
+  const addBtn=$('fallbackModelAddBtn');
+  if(!sel||!addSel) return;
+  // Clone groups from settingsModel dropdown
+  addSel.innerHTML='<option value="">Add model...</option>';
+  const currentFallbacks=new Set(_readCurrentFallbackList().map(e=>e.model));
+  for(const og of sel.querySelectorAll('optgroup')){
+    const group=document.createElement('optgroup');
+    group.label=og.label;
+    for(const opt of og.querySelectorAll('option')){
+      // Skip models already in fallback list
+      if(currentFallbacks.has(opt.value)) continue;
+      const o=document.createElement('option');
+      o.value=opt.value;
+      o.textContent=opt.textContent;
+      // Store provider in data attribute
+      if(og.dataset&&og.dataset.provider) o.dataset.provider=og.dataset.provider;
+      group.appendChild(o);
+    }
+    if(group.children.length) addSel.appendChild(group);
+  }
+  // Also add non-grouped options
+  for(const opt of sel.querySelectorAll(':scope > option')){
+    if(currentFallbacks.has(opt.value)) continue;
+    const o=document.createElement('option');
+    o.value=opt.value;
+    o.textContent=opt.textContent;
+    addSel.appendChild(o);
+  }
+  // Wire add button
+  if(addBtn){
+    addBtn.onclick=()=>{
+      const selected=addSel.querySelector('option:checked');
+      if(!selected||!selected.value) return;
+      const providers=_readCurrentFallbackList();
+      // Extract provider from optgroup or data attribute
+      const providerGroup=selected.closest('optgroup');
+      const provider=(selected.dataset&&selected.dataset.provider)||(providerGroup&&(providerGroup.dataset&&providerGroup.dataset.provider))||'';
+      providers.push({model:selected.value,provider:provider});
+      _renderFallbackModelsList(providers);
+      _populateFallbackModelsDropdown(); // refresh to remove added item
+      _markSettingsDirty();
+    };
+  }
+}
+
+async function _saveFallbackIfNeeded(){
+  const current=_readCurrentFallbackList();
+  const isOpen=current.length===_settingsFallbackOnOpen.length
+    &&current.every((e,i)=>{const o=_settingsFallbackOnOpen[i]||{};return e.model===o.model&&e.provider===o.provider;});
+  if(isOpen) return;
+  try{
+    await api('/api/fallback-providers',{method:'POST',body:JSON.stringify({providers:current})});
+    _settingsFallbackOnOpen=JSON.parse(JSON.stringify(current));
+  }catch(_e){
+    if(typeof showToast==='function') showToast('Failed to update fallback models — settings saved');
   }
 }

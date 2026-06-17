@@ -239,6 +239,16 @@
       </div>
       <div class="kanban-summary" id="kanbanSummary"></div>
       <div class="kanban-list" id="kanbanList"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+      <!-- Agent Status Sidebar -->
+      <div class="kanban-agent-sidebar-wrap" id="kanbanAgentSidebarWrap">
+        <button class="kanban-agent-toggle" id="kanbanAgentToggle" onclick="toggleAgentSidebar()">
+          <span class="kanban-agent-toggle-label">Agents</span>
+          <span class="kanban-agent-count" id="kanbanAgentCount">0</span>
+          <span class="kanban-agent-chevron" id="kanbanAgentChevron">▾</span>
+        </button>
+        <div class="kanban-agent-sidebar" id="kanbanAgentSidebar" hidden>
+        </div>
+      </div>
     </div>
     <!-- Skills panel -->
     <div class="panel-view" id="panelSkills">
@@ -1027,6 +1037,15 @@
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_auxiliary_model">Model for background tasks (compression, web extraction, titles, etc.). Set independently from the chat model so research models don't burn tokens on housekeeping.</div>
             </div>
             <div class="settings-field">
+              <label for="settingsFallbackModels" data-i18n="settings.fallback_models">Fallback Models</label>
+              <p class="settings-help" data-i18n="settings.fallback_models_help">Automatic failover chain when primary model fails (401, 429, timeout). The agent tries each model in order.</p>
+              <div id="fallbackModelsContainer" class="fallback-models-list"></div>
+              <div class="fallback-models-actions">
+                <select id="fallbackModelAddSelect" style="flex:1;padding:6px 8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px;font-size:12px"><option value="">Add model...</option></select>
+                <button id="fallbackModelAddBtn" class="btn btn-sm" type="button">+</button>
+              </div>
+            </div>
+            <div class="settings-field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="settingsHideSuggestions" style="width:15px;height:15px;accent-color:var(--accent)">
                 <span data-i18n="settings_label_hide_suggestions">Hide new-chat suggestions</span>
@@ -1527,6 +1546,11 @@
       <button type="button" class="btn primary" id="kanbanTaskModalSubmit" onclick="submitKanbanTaskModal()" data-i18n="create">Create</button>
     </div>
   </div>
+</div>
+<!-- Kanban: task tree modal -->
+<div class="kanban-modal-overlay" id="kanbanTreeModal" hidden>
+  <div class="kanban-modal-overlay-bg" style="position:fixed;inset:0;z-index:0"></div>
+  <div class="kanban-modal kanban-tree-modal" role="dialog" aria-modal="true" style="max-width:640px;max-height:80vh;display:flex;flex-direction:column"></div>
 </div>
 </body>
 </html>
