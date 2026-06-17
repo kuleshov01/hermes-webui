@@ -6377,7 +6377,62 @@ async function loadSettingsPanel(){
         const providers=(fbCfg&&fbCfg.providers)||[];
         _settingsFallbackOnOpen=JSON.parse(JSON.stringify(providers));
         _renderFallbackModelsList(providers);
-        _populateFallbackModelsDropdown();
+        // Populate dropdown from settingsModel (already filled above)
+        if(modelSel){
+          const addSel=$('fallbackModelAddSelect');
+          const addBtn=$('fallbackModelAddBtn');
+          if(addSel){
+            addSel.innerHTML='<option value="">Add model...</option>';
+            const currentFallbacks=new Set(providers.map(e=>e.model));
+            for(const g of modelSel.querySelectorAll('optgroup')){
+              const group=document.createElement('optgroup');
+              group.label=g.label;
+              if(g.dataset.provider) group.dataset.provider=g.dataset.provider;
+              for(const m of g.querySelectorAll('option')){
+                if(currentFallbacks.has(m.value)) continue;
+                const o=document.createElement('option');
+                o.value=m.value;o.textContent=m.textContent;
+                group.appendChild(o);
+              }
+              if(group.children.length) addSel.appendChild(group);
+            }
+            for(const m of modelSel.querySelectorAll(':scope > option')){
+              if(currentFallbacks.has(m.value)) continue;
+              const o=document.createElement('option');
+              o.value=m.value;o.textContent=m.textContent;
+              addSel.appendChild(o);
+            }
+          }
+          if(addBtn){
+            addBtn.onclick=()=>{
+              const selected=addSel.querySelector('option:checked');
+              if(!selected||!selected.value) return;
+              const currentList=_readCurrentFallbackList();
+              const providerGroup=selected.closest('optgroup');
+              const provider=(providerGroup&&providerGroup.dataset&&providerGroup.dataset.provider)||(selected.dataset&&selected.dataset.provider)||'';
+              currentList.push({model:selected.value,provider:provider});
+              _renderFallbackModelsList(currentList);
+              _markSettingsDirty();
+              // Refresh dropdown to remove just-added model
+              const refreshAddSel=$('fallbackModelAddSelect');
+              if(refreshAddSel){
+                const newFallbacks=new Set(currentList.map(e=>e.model));
+                refreshAddSel.querySelectorAll('option').forEach(o=>{
+                  if(o.value && newFallbacks.has(o.value)){
+                    const parent=o.closest('optgroup');
+                    if(parent) parent.removeChild(o);
+                    else refreshAddSel.removeChild(o);
+                  }
+                });
+                // Also remove empty optgroups
+                refreshAddSel.querySelectorAll('optgroup').forEach(og=>{
+                  if(!og.children.length) refreshAddSel.removeChild(og);
+                });
+                refreshAddSel.value='';
+              }
+            };
+          }
+        }
       }catch(_e){}
     })();
     // Send key preference
@@ -8684,52 +8739,22 @@ function _removeFallbackItem(idx){
   _markSettingsDirty();
 }
 
-function _populateFallbackModelsDropdown(){
-  const sel=$('settingsModel');
-  const addSel=$('fallbackModelAddSelect');
-  const addBtn=$('fallbackModelAddBtn');
-  if(!sel||!addSel) return;
-  // Clone groups from settingsModel dropdown
-  addSel.innerHTML='<option value="">Add model...</option>';
-  const currentFallbacks=new Set(_readCurrentFallbackList().map(e=>e.model));
-  for(const og of sel.querySelectorAll('optgroup')){
-    const group=document.createElement('optgroup');
-    group.label=og.label;
-    for(const opt of og.querySelectorAll('option')){
-      // Skip models already in fallback list
-      if(currentFallbacks.has(opt.value)) continue;
-      const o=document.createElement('option');
-      o.value=opt.value;
-      o.textContent=opt.textContent;
-      // Store provider in data attribute
-      if(og.dataset&&og.dataset.provider) o.dataset.provider=og.dataset.provider;
-      group.appendChild(o);
-    }
-    if(group.children.length) addSel.appendChild(group);
-  }
-  // Also add non-grouped options
-  for(const opt of sel.querySelectorAll(':scope > option')){
-    if(currentFallbacks.has(opt.value)) continue;
-    const o=document.createElement('option');
-    o.value=opt.value;
-    o.textContent=opt.textContent;
-    addSel.appendChild(o);
-  }
-  // Wire add button
-  if(addBtn){
-    addBtn.onclick=()=>{
-      const selected=addSel.querySelector('option:checked');
-      if(!selected||!selected.value) return;
-      const providers=_readCurrentFallbackList();
-      // Extract provider from optgroup or data attribute
-      const providerGroup=selected.closest('optgroup');
-      const provider=(selected.dataset&&selected.dataset.provider)||(providerGroup&&(providerGroup.dataset&&providerGroup.dataset.provider))||'';
-      providers.push({model:selected.value,provider:provider});
-      _renderFallbackModelsList(providers);
-      _populateFallbackModelsDropdown(); // refresh to remove added item
-      _markSettingsDirty();
-    };
-  }
+function _moveFallbackItem(idx,direction){
+  const providers=_readCurrentFallbackList();
+  const newIdx=idx+direction;
+  if(newIdx<0||newIdx>=providers.length) return;
+  const tmp=providers[idx];
+  providers[idx]=providers[newIdx];
+  providers[newIdx]=tmp;
+  _renderFallbackModelsList(providers);
+  _markSettingsDirty();
+}
+
+function _removeFallbackItem(idx){
+  const providers=_readCurrentFallbackList();
+  providers.splice(idx,1);
+  _renderFallbackModelsList(providers);
+  _markSettingsDirty();
 }
 
 async function _saveFallbackIfNeeded(){

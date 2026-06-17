@@ -4746,8 +4746,8 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 @keyframes kt-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 /* ── DAG (horizontal) layout ── */
 .kt-dag-root{display:inline-flex;flex-direction:row;align-items:flex-start;padding:8px;gap:0;position:relative;}
-.kt-dag-wrap{position:relative;flex:1;overflow:hidden;}
-.kt-body-dag{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
+.kt-dag-wrap{position:relative;flex:1;overflow:hidden;min-height:0;}
+.kt-body-dag{overflow:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
 .kt-body-dag::-webkit-scrollbar{height:6px;}
 .kt-body-dag::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
 .kt-body-dag::-webkit-scrollbar-track{background:transparent;}
