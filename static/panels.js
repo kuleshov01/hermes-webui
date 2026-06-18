@@ -1699,9 +1699,6 @@ async function loadKanban(animate){
   const list = $('kanbanList');
   try {
     if (animate && board) board.innerHTML = `<div style="padding:16px;color:var(--muted);font-size:13px">${esc(t('loading'))}</div>`;
-    // Resolve the active board before board-scoped requests. If another CLI or
-    // tab archived the previous board, /boards can fall back to default instead
-    // of leaving config/board pinned to a ghost slug.
     await loadKanbanBoards();
     const config = await api('/api/kanban/config' + _kanbanBoardQuery());
     let assignees = null;
@@ -8603,23 +8600,31 @@ async function showTaskTree(taskId){
     const statusLabel = (s)=>({done:'done',archived:'archived',running:'running',ready:'ready',blocked:'blocked',triage:'triage',todo:'todo'}[s]||s);
     const statusClass = (s)=>({done:'kt-done',archived:'kt-archived',running:'kt-running',ready:'kt-ready',blocked:'kt-blocked',triage:'kt-triage'}[s]||'kt-todo');
 
+    const statusEmoji = (s)=>({done:'✓',archived:'📦',running:'⚡',ready:'◉',blocked:'⊘',triage:'?',todo:'○'}[s]||'○');
+    const roleEmoji = (a)=>(/reviewer/i.test(a)?'🔍':/tester/i.test(a)?'🧪':/coder|devops|developer/i.test(a)?'⚙️':/orchestrator/i.test(a)?'🎯':'👤');
+
     function renderCard(id) {
       const tk = tasks[id] || {id, title: id, status:'todo', assignee:null};
       const cls = statusClass(tk.status);
       const label = statusLabel(tk.status);
-      const shortId = tk.id.replace(/^t_/,'');
       const title = tk.title || tk.id;
       const hl = id===taskId ? ' kt-hl' : '';
+      const emoji = statusEmoji(tk.status);
+      const roleIcon = tk.assignee ? roleEmoji(tk.assignee) : '';
       return `<div class="kt-dag-node${hl} ${cls}"><div class="kt-content" data-tid="${esc(tk.id)}" title="${esc(title)}">`
-        + `<span class="kt-badge ${cls}">${esc(label)}</span>`
-        + `<div class="kt-info"><span class="kt-id">${esc(shortId)}</span><span class="kt-title">${esc(title)}</span>`
+        + `<div class="kt-title">${esc(title)}</div>`
+        + `<div class="kt-meta">${roleIcon}`
         + (tk.assignee ? `<span class="kt-assignee">@${esc(tk.assignee)}</span>` : '')
+        + `<span class="kt-badge ${cls}">${emoji} ${esc(label)}</span>`
         + `</div></div></div>`;
     }
 
+    const laneLabels = ['Root', 'Dev', 'Test', 'Review', 'Deploy', 'Ext', 'Ext+', 'Ext++'];
+
     // Build columns HTML
     let colsHtml = columns.map((col, d) => {
-      return `<div class="kt-dag-column" data-gen="${d}">`
+      const label = laneLabels[d] || `D${d}`;
+      return `<div class="kt-dag-column" data-gen="${d}" data-label="${esc(label)}">`
         + col.map(renderCard).join('')
         + '</div>';
     }).join('');
@@ -8629,8 +8634,8 @@ async function showTaskTree(taskId){
       : '';
 
     body.innerHTML = `
-      <div class="kt-head"><h3>🌳 Board Tree</h3><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--muted)">${esc(filteredIds.length)} tasks · ${esc(roots.length)} root${roots.length!==1?'s':''} · ${esc(filteredLinks.length)} links</span>${showAllBtn}<button class="kt-close" onclick="document.getElementById('kanbanTreeModal').hidden=true;this.closest('.kanban-modal').classList.remove('kt-wide')">&times;</button></div></div>
-      <div class="kt-dag-wrap" id="ktDagWrap"><button class="kt-dag-scroll left" onclick="document.getElementById('ktDagBody').scrollBy({left:-300,behavior:'smooth'})">‹</button><div class="kt-body kt-body-dag" id="ktDagBody"><div class="kt-dag-root" id="ktDagRoot">${colsHtml}<svg class="kt-svg" id="ktSvg"></svg></div></div><button class="kt-dag-scroll right" onclick="document.getElementById('ktDagBody').scrollBy({left:300,behavior:'smooth'})">›</button></div>
+      <div class="kt-head"><h3 style="display:flex;align-items:center;gap:8px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 5-9"/></svg>Board Tree</h3><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--muted)">${esc(filteredIds.length)} tasks · ${esc(roots.length)} root${roots.length!==1?'s':''} · ${esc(filteredLinks.length)} links</span>${showAllBtn}<button class="kt-close" onclick="document.getElementById('kanbanTreeModal').hidden=true;this.closest('.kanban-modal').classList.remove('kt-wide')">&times;</button></div></div>
+      <div class="kt-dag-wrap" id="ktDagWrap"><button class="kt-dag-scroll left" onclick="document.getElementById('ktDagWrap').scrollBy({left:-300,behavior:'smooth'})">‹</button><div class="kt-body kt-body-dag" id="ktDagBody"><div class="kt-dag-root" id="ktDagRoot">${colsHtml}<svg class="kt-svg" id="ktSvg"></svg></div></div><button class="kt-dag-scroll right" onclick="document.getElementById('ktDagWrap').scrollBy({left:300,behavior:'smooth'})">›</button></div>
       <div class="kt-foot">${esc(t('kanban_task_tree_hint')||'Click a task to navigate · Highlighted = current')}</div>`;
 
     body.querySelectorAll('.kt-content').forEach(el=>{
@@ -8654,9 +8659,25 @@ async function showTaskTree(taskId){
 
       const rootRect = root.getBoundingClientRect();
       let paths = '';
+      // SVG defs for arrow markers
+      const defs = `<defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="rgba(128,128,128,.5)"/>
+        </marker>
+        <marker id="arrow-done" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="rgba(74,222,128,.6)"/>
+        </marker>
+        <marker id="arrow-running" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="rgba(96,165,250,.7)"/>
+        </marker>
+        <marker id="arrow-blocked" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="rgba(249,115,22,.7)"/>
+        </marker>
+      </defs>`;
       for (const parentId of Object.keys(treeChildrenOf)) {
         const parentEl = root.querySelector(`.kt-dag-node .kt-content[data-tid="${parentId}"]`);
         if (!parentEl) continue;
+        const pTk = tasks[parentId] || {};
         for (const childId of treeChildrenOf[parentId]) {
           const childEl = root.querySelector(`.kt-dag-node .kt-content[data-tid="${childId}"]`);
           if (!childEl) continue;
@@ -8667,10 +8688,15 @@ async function showTaskTree(taskId){
           const x2 = cr.left - rootRect.left;
           const y2 = cr.top + cr.height / 2 - rootRect.top;
           const mx = (x1 + x2) / 2;
-          paths += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="rgba(128,128,128,.4)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+          // Color by child status
+          const cTk = tasks[childId] || {};
+          const cS = cTk.status || 'todo';
+          const arrowRef = cS==='done'?'url(#arrow-done)':cS==='running'?'url(#arrow-running)':cS==='blocked'?'url(#arrow-blocked)':'url(#arrow)';
+          const strokeC = cS==='done'?'rgba(74,222,128,.5)':cS==='running'?'rgba(96,165,250,.5)':cS==='blocked'?'rgba(249,115,22,.5)':'rgba(128,128,128,.35)';
+          paths += `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${strokeC}" stroke-width="1.5" marker-end="${arrowRef}"/>`;
         }
       }
-      svg.innerHTML = paths;
+      svg.innerHTML = defs + paths;
     });
 
   } catch(e){

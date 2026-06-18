@@ -1180,12 +1180,13 @@ _PROVIDER_MODELS = {
     ],
     # OpenCode Zen — curated models via opencode.ai/zen (pay-as-you-go credits)
     "opencode-zen": [
-        {"id": "big-pickle", "label": "Big Pickle"},
+        # Fallback only — live fetch via plugin is the primary source.
+        # Keep in sync loosely; the plugin auto-discovers all -free models.
         {"id": "deepseek-v4-flash-free", "label": "DeepSeek V4 Flash Free"},
         {"id": "mimo-v2.5-free", "label": "Mimo V2.5 Free"},
-        {"id": "minimax-m3-free", "label": "MiniMax M3 Free"},
-        {"id": "nemotron-3-super-free", "label": "Nemotron 3 Super Free"},
-        {"id": "qwen3.6-plus-free", "label": "Qwen3.6 Plus Free"},
+        {"id": "nemotron-3-ultra-free", "label": "Nemotron 3 Ultra Free"},
+        {"id": "north-mini-code-free", "label": "North Mini Code Free"},
+        {"id": "big-pickle", "label": "Big Pickle"},
     ],
     # OpenCode Go — flat-rate models via opencode.ai/go ($10/month)
     "opencode-go": [
