@@ -567,9 +567,11 @@ async function newSession(flash, options={}){
     }
     // Only pass model if the user explicitly changed it before creating
     // the session. If picker matches config default, let server decide.
+    // Normalize both sides: strip @provider: prefix for comparison.
     const _configDefaultModel = String(window._defaultModel || '').trim();
     const pickerModel = (newModelState && newModelState.model) || '';
-    if(pickerModel && pickerModel !== _configDefaultModel){
+    const pickerBare = pickerModel.replace(/^@[^:]+:/, '');
+    if(pickerModel && pickerBare !== _configDefaultModel){
       reqBody.model=pickerModel;
       // Cold-start / picker-without-provider fallback: when the dropdown option's
       // data-provider is empty/'default' or the persisted state predates provider
