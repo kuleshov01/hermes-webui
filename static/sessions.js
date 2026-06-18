@@ -556,9 +556,8 @@ async function newSession(flash, options={}){
     if(S.session&&S.session.session_id) reqBody.prev_session_id=S.session.session_id;
     if(options&&options.worktree) reqBody.worktree=true;
     if(_activeProject&&_activeProject!==NO_PROJECT_FILTER) reqBody.project_id=_activeProject;
-    // Carry the visible picker selection into the new session. Without this,
-    // /api/session/new falls back to config.yaml defaults (e.g. gpt-5.5) even
-    // when the user already chose cursor/composer-2.5 in the composer chip.
+    // New session always starts with the default model from config.yaml.
+    // Don't carry the picker selection — that was a surprising override.
     const modelSelForNew=$('modelSelect');
     let newModelState=null;
     if(modelSelForNew&&modelSelForNew.value&&typeof _modelStateForSelect==='function'){
@@ -566,8 +565,12 @@ async function newSession(flash, options={}){
     }else if(typeof _readPersistedModelState==='function'){
       newModelState=_readPersistedModelState();
     }
-    if(newModelState&&newModelState.model){
-      reqBody.model=newModelState.model;
+    // Only pass model if the user explicitly changed it before creating
+    // the session. If picker matches config default, let server decide.
+    const _configDefaultModel = String(window._defaultModel || '').trim();
+    const pickerModel = (newModelState && newModelState.model) || '';
+    if(pickerModel && pickerModel !== _configDefaultModel){
+      reqBody.model=pickerModel;
       // Cold-start / picker-without-provider fallback: when the dropdown option's
       // data-provider is empty/'default' or the persisted state predates provider
       // tracking, newModelState.model_provider is null. POST /api/session/new's
