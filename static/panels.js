@@ -5256,6 +5256,7 @@ function _renderProfileDetail(p, activeName){
 function _setProfileHeaderButtons(mode, p, activeName){
   const actBtn = $('btnActivateProfileDetail');
   const delBtn = $('btnDeleteProfileDetail');
+  const editBtn = $('btnEditProfileDetail');
   const cancelBtn = $('btnCancelProfileDetail');
   const saveBtn = $('btnSaveProfileDetail');
   const show = b => b && (b.style.display = '');
@@ -5264,12 +5265,14 @@ function _setProfileHeaderButtons(mode, p, activeName){
     const isActive = p && p.name === activeName;
     const isDefault = !!(p && p.is_default);
     if (isActive) hide(actBtn); else show(actBtn);
-    if (isDefault) hide(delBtn); else show(delBtn);
+    if (isDefault) { hide(delBtn); hide(editBtn); } else { show(delBtn); show(editBtn); }
     hide(cancelBtn); hide(saveBtn);
   } else if (mode === 'create') {
-    hide(actBtn); hide(delBtn); show(cancelBtn); show(saveBtn);
+    hide(actBtn); hide(delBtn); hide(editBtn); show(cancelBtn); show(saveBtn);
+  } else if (mode === 'edit') {
+    hide(actBtn); hide(delBtn); hide(editBtn); show(cancelBtn); show(saveBtn);
   } else {
-    [actBtn, delBtn, cancelBtn, saveBtn].forEach(hide);
+    [actBtn, delBtn, editBtn, cancelBtn, saveBtn].forEach(hide);
   }
 }
 
@@ -8619,12 +8622,9 @@ async function showTaskTree(taskId){
         + `</div></div></div>`;
     }
 
-    const laneLabels = ['Root', 'Dev', 'Test', 'Review', 'Deploy', 'Ext', 'Ext+', 'Ext++'];
-
     // Build columns HTML
     let colsHtml = columns.map((col, d) => {
-      const label = laneLabels[d] || `D${d}`;
-      return `<div class="kt-dag-column" data-gen="${d}" data-label="${esc(label)}">`
+      return `<div class="kt-dag-column" data-gen="${d}">`
         + col.map(renderCard).join('')
         + '</div>';
     }).join('');
